@@ -1,0 +1,197 @@
+'''
+Script for transforming specific Jupyter notebook cells into python scripts.
+Adapted from https://github.com/fastai/course-v3/blob/master/nbs/dl2/notebook_to_script.py
+'''
+
+import json,fire,re
+from pathlib import Path
+import io
+import inspect
+import glob
+
+def is_export(cell):
+    '''Checks if first or second line of cell contains `#export`'''
+
+    if cell['cell_type'] != 'code': return False
+    src = cell['source']
+    if len(src) == 0 or len(src)==1: return False
+    
+    for s in src[:2]:
+        if re.match(r'^\s*#\s*export\s*', s, re.IGNORECASE) is not None:
+            return True
+    return False
+
+def parts_to_path(parts):
+
+    path = Path(parts[0])
+    for part in parts[1:]:
+        path /= part
+    
+    return path
+
+def find_common_parent(path1, path2):
+    '''Find common parent between two paths'''
+
+    common_parts = []
+    for part1, part2 in zip(path1.parts, path2.parts):
+        if part1==part2:
+            common_parts.append(part1)
+
+    if len(common_parts)==0:
+        common_parent = None
+    else:
+        common_parent = parts_to_path(common_parts)
+        
+    return common_parent
+            
+def relative_to(ref_path, other_path):
+    '''Return relative path from `ref_path` to `other_path`. Notice that if `other_path` is a file, 
+    the returned relative path will also be a file with the same name. Examples:
+
+    ref_path = '/folder1/folder2/folder3/file.py'
+    other_path '/folder1/folder2/codes'
+    returns '../codes'
+
+    ref_path = '/folder1/folder2/folder3/file.py'
+    other_path '/folder1/folder2/codes/myfile.py'
+    returns '../codes/myfile.py'
+
+    ref_path = '/folder1/folder2/file.py'
+    other_path '/folder1/folder2/codes/myfile.py'
+    returns 'codes/myfile.py'
+
+    Returns None if a relative path cannot be found
+    '''
+    
+    common_parent = find_common_parent(ref_path, other_path)
+    if common_parent is None:
+        return None
+    else:
+        rel_out_path = other_path.relative_to(common_parent)
+    
+    num_levels = len(ref_path.parts) - len(common_parent.parts)
+    if ref_path.is_file():
+        num_levels -= 1
+        
+    rel_path = Path('../'*num_levels)/rel_out_path
+    
+    return rel_path
+
+def get_output_path(ref_path, other_path):
+    '''Return relative path from `ref_path` to `other_path`. See `relative_to` for examples.
+
+    Returns `other_path` if a relative path cannot be found
+    '''
+    
+    rel_path = relative_to(ref_path, other_path)
+    if rel_path is None:
+        rel_path = other_path
+    return rel_path
+
+def get_sorted_files(all_files):
+    '''Returns all the notebok files sorted by name.
+       all_files = True : returns all files
+       up_to = None : no upper limit
+            = filter : returns all files up to 'filter' included
+       The sorting optioj is important to ensure that the notebok are executed in correct order.
+    '''
+
+    ret = []
+    if (all_files==True): ret = glob.glob('*.ipynb') # Checks both that is bool type and that is True
+    if (isinstance(all_files,str)): ret = glob.glob(all_files)
+    if 0==len(ret): 
+        print('WARNING: No files found')
+        return ret
+    return sorted(ret)
+
+def iterate_folder_path(path):
+    '''For path x/y/z, yields a list [x, x/y, x/y/z]'''
+    
+    dirs = path.parts
+    par_path = Path('.')
+    for dir in dirs:
+        par_path = par_path/dir
+        yield par_path
+        
+def create_folder(out_folder):
+    
+    out_folder = Path(out_folder)
+    for folder in iterate_folder_path(out_folder):
+        if not folder.exists(): folder.mkdir()
+
+def notebook_to_script(fname=None, all_files=None, out_folder=None):
+    '''Finds cells starting with `#export` on first or second line and puts them into a new module
+       + all_files: convert all files in the folder
+       + up_to: convert files up to specified one included
+       + out_folder: output folder. If not given, creates a new folder with same name as the parent folder
+       
+       ES: 
+       notebook_to_script --all_files=True   # Parse all files
+       notebook_to_script --all_files=nb*   # Parse all files starting with nb*
+       notebook_to_script --all_files=*_*.ipynb   # Parse all files with an '_'
+    '''
+
+    # initial checks
+    if (fname is None) and (not all_files): print('Should provide a file name')
+    if (out_folder is not None): create_folder(out_folder)
+    if not all_files: notebook_to_script_single(fname, out_folder)
+    else:
+        print('Begin...')
+        [notebook_to_script_single(f, out_folder) for f in get_sorted_files(all_files)]
+        print('...End')
+        
+        
+def notebook_to_script_single(fname, out_folder=None):
+    "Finds cells starting with `#export` and puts them into a new module"
+
+    fname = Path(fname)
+    main_dic = json.load(open(fname,'r',encoding="utf-8"))
+    code_cells = [c for c in main_dic['cells'] if is_export(c)]
+    module_header = inspect.cleandoc('''
+    #################################################
+    ###       THIS FILE WAS AUTOGENERATED!        ###
+    #################################################
+    # Original notebook: ''')
+
+    notebook_full_path = fname.resolve()
+    if out_folder is None:
+        # Define output folder at ./ with same name as parent
+        #parent_folder = notebook_full_path.parent
+        #out_folder = parent_folder.name
+        out_folder = notebook_full_path.parent
+    out_folder = Path(out_folder)
+
+    modules = {}
+    for cell in code_cells: 
+        cell_path_out = ''
+        for s in cell['source'][:2]:
+            m = re.match(r'(^\s*#\s*export\s*)(\S*)', s, re.IGNORECASE)
+            if m is not None:
+                cell_path_out = m.group(2)
+
+        if cell_path_out=='':
+            print('Output filename not found, ignoring cell')
+            continue
+
+        module_code = ''.join(cell['source'][2:]) + '\n\n'
+        # remove trailing spaces
+        module_code = re.sub(r' +$', '', module_code, flags=re.MULTILINE)
+        if cell_path_out in modules:
+            modules[cell_path_out] += module_code
+        else:
+            modules[cell_path_out] = module_code
+
+    #import pdb;pdb.set_trace()
+
+    for cell_path_out in modules:
+        path_out = out_folder/cell_path_out       # cell_path_out may contain nested directories (ex: x/y/file.py)
+        create_folder(path_out.parent)
+
+        rel_notebook_path = get_output_path(out_folder.resolve()/cell_path_out, notebook_full_path)
+        module_code = f'{module_header}{rel_notebook_path}\n{modules[cell_path_out][:-2]}'
+        with io.open(path_out, "w", encoding="utf-8") as f:
+            f.write(module_code)
+        print(f"Converted {Path(cell_path_out).as_posix()} to {path_out.as_posix()}")
+
+if __name__ == '__main__': fire.Fire(notebook_to_script)
+

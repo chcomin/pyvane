@@ -1,0 +1,7 @@
+file\_util module
+=================
+
+.. automodule:: file_util
+   :members:
+   :undoc-members:
+   :show-inheritance:

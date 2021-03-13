@@ -1,0 +1,7 @@
+img\_io module
+==============
+
+.. automodule:: img_io
+   :members:
+   :undoc-members:
+   :show-inheritance:
