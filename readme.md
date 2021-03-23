@@ -30,7 +30,7 @@ Having the binary image and the medial lines, a model of the blood vessels surfa
 
 <img src="docs/readme_imgs/reconstructed.png" width="600" />
 
-### Medial Axis
+### Graph Generation and Adjustment
 
 Files inside the [graph](pyvesto/graph.py) folder are responsible for creating the graph and removing some artifacts such as small branches generated from the skeleton calculation.
 
