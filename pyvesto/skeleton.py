@@ -3,9 +3,10 @@
 import numpy as np
 import ctypes as ct
 from pyvesto.image import Image
+from pathlib import Path
 
 try:
-    libskeleton = ct.CDLL('./libskeleton.so')
+    libskeleton = ct.CDLL(Path(__file__).parent/'libskeleton.so')
 except Exception:
     print('Could not load skeleton library. Unable to calculate skeletons.')
 

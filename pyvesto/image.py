@@ -142,7 +142,7 @@ class Image:
         pix_size = self.pix_size
         zoom_ratio = pix_size/np.min(pix_size)
         self.data = ndi.interpolation.zoom(self.data, zoom_ratio, order=2)
-        self.pix_size = (np.min(pix_size),)*3
+        self.pix_size = (np.min(pix_size),)*self.data.ndim
 
     def to_uint8(self):
         """Convert data type to np.uint8"""

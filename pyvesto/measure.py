@@ -208,7 +208,7 @@ def vessel_density(graph, img_shape=None, img_roi=None, scale_factor=1):
     length = total_length(graph, img_roi)*scale_factor
     volume = img_volume(pix_size, img_shape, img_roi, scale_factor)
     density = length/volume
-
+    print(length, volume)
     return density
 
 def branch_point_density(graph, img_shape=None, img_roi=None, scale_factor=1):

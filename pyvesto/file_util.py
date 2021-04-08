@@ -5,6 +5,7 @@ from collections import deque
 import natsort
 import copy
 import os
+from shutil import copy2
 
 class Tree:
     """Class representing a directed tree. If you want node and edge attributes, the tree should
@@ -489,6 +490,31 @@ def create_directory(directory):
     for dir in iterate_directory_path(directory):
         if not dir.exists(): dir.mkdir()
 
+def get_file_tag(file, directory=None, sep='@', include_ext=False):
+
+        file_parts = file.parts
+        if directory is not None:
+            ind = file_parts.index(directory)
+            file_parts = file_parts[ind+1:]
+
+        if include_ext:
+            tag = sep.join(file_parts)
+        else:
+            tag = sep.join(file_parts[:-1])
+            tag += sep+file.stem
+
+        return tag
+
+def flatten_directory(in_folder, out_folder, name_filter=None, sep='@'):
+
+    in_folder = Path(in_folder)
+    in_folder = Path(in_folder)
+    directory = in_folder.parts[-1]
+    _, files = get_files(in_folder, name_filter)
+    for file in files:
+        file_tag = get_file_tag(file, directory, sep, include_ext=True)
+        copy2(file, out_folder/file_tag)
+
 def make_directories(file_tree, out_dir, gen_step_dirs=None, gen_subdirs=None):
     """Make directories for saving experiment data.
 
@@ -521,55 +547,6 @@ def make_directories(file_tree, out_dir, gen_step_dirs=None, gen_subdirs=None):
                 for gen_subdir in gen_subdirs:
                     new_subdir = out_dir/gen_dir/rel_path/gen_subdir
                     create_directory(new_subdir)
-
-def make_directories_old(file_tree, out_dir, gen_step_dirs=None, gen_subdirs=None):
-    """Make directories for saving experiment data.
-
-    Parameters
-    ----------
-    param : list
-        Description
-
-    Returns
-    -------
-    param : int
-        Description
-    """
-
-    if gen_step_dirs is None:
-        gen_step_dirs = []
-    if gen_subdirs is None:
-        gen_subdirs = []
-
-    out_dir = Path(out_dir)
-    curr_root = file_tree.root_path
-    curr_root_parent = curr_root.parent
-
-    # Generate main directory
-    if not out_dir.is_dir():
-        os.mkdir(out_dir)
-
-    # Generate root directories for each pipeline step (e.g., Binary, Skeleton, etc)
-    for gen_dir in gen_step_dirs:
-        new_dir = out_dir/gen_dir
-        if not new_dir.is_dir():
-            os.mkdir(new_dir)
-
-    # Generate directories for each experiment
-    for directory in file_tree.get_directories():
-        rel_path = directory.relative_to(curr_root_parent)
-
-        for gen_dir in gen_step_dirs:
-            new_dir = out_dir/gen_dir/rel_path
-            if not new_dir.is_dir():
-                os.mkdir(new_dir)
-
-            # Generate subdirectories for each experiment (e.g., max proj, numpy, etc)
-            if directory_has_file(directory):
-                for gen_subdir in gen_subdirs:
-                    new_subdir = new_dir/gen_subdir
-                    if not new_subdir.is_dir():
-                        os.mkdir(new_subdir)
 
 # Unused functions
 def _find_common_parent(path1, path2):

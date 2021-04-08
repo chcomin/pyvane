@@ -48,8 +48,9 @@ def read_img(path, channel=None, read_pix_size=True):
     pix_size = np.array(pix_size)
 
     if len(shape)==2:
-        print('Warning, image is 2D')
-        img_data = img_data[None]      # Add one dimension
+        #print('Warning, image is 2D')
+        #img_data = img_data[None]      # Add one dimension
+        pass
     elif len(shape)==3:
         min_dim = np.min(shape)
         if min_dim<=4:
@@ -58,7 +59,7 @@ def read_img(path, channel=None, read_pix_size=True):
         pass
     else:
         raise ValueError(f'Image has unrecognized shape: {shape}')
-
+    
     if channel is not None:
         img_data = img_data[channel]
 
@@ -93,6 +94,7 @@ def read_tiff(path, return_pix_size=False):
         return img_data
 
     pix_size = find_pix_size_tiff(tiff_data)
+    pix_size = pix_size[-img_data.ndim:]
     return img_data, pix_size
 
 def read_oib(path, return_pix_size=False):
@@ -210,31 +212,34 @@ def find_pix_size_tiff(tiff_data):
         The pixel size.
     """
 
-    pix_size_z = 1.
-    num_char = 21
-    imagej_tags = tiff_data.pages[0].imagej_tags
-    if 'spacing' in imagej_tags:
-        pix_size_z = imagej_tags['spacing']
-    if ('info' in imagej_tags):
-        img_info=data.pages[0].imagej_tags['info']
-        k1 = img_info.find('HeightConvertValue')
-        if k1!=-1:
-            aux = img_info[k1+num_char:k1+num_char+10]
-            k2 = aux.find('\n')
-            pix_size_x = float(aux[:k2])
-            k1 = img_info.find('WidthConvertValue')
-            aux = img_info[k1+num_char-1:k1+num_char+10-1]
-            k2 = aux.find('\n')
-            pix_size_y = float(aux[:k2])
-        else:
-            pix_size_x, pix_size_y = -1, -1
+    try:
+        pix_size_z = 1.
+        num_char = 21
+        imagej_tags = tiff_data.pages[0].imagej_tags
+        if 'spacing' in imagej_tags:
+            pix_size_z = imagej_tags['spacing']
+        if ('info' in imagej_tags):
+            img_info=data.pages[0].imagej_tags['info']
+            k1 = img_info.find('HeightConvertValue')
+            if k1!=-1:
+                aux = img_info[k1+num_char:k1+num_char+10]
+                k2 = aux.find('\n')
+                pix_size_x = float(aux[:k2])
+                k1 = img_info.find('WidthConvertValue')
+                aux = img_info[k1+num_char-1:k1+num_char+10-1]
+                k2 = aux.find('\n')
+                pix_size_y = float(aux[:k2])
+            else:
+                pix_size_x, pix_size_y = -1, -1
 
-    else:
-        p = data.pages[0]
-        v = p.tags['x_resolution'].value
-        pix_size_x = v[1]/float(v[0])
-        v = p.tags['y_resolution'].value
-        pix_size_y = v[1]/float(v[0])
+        else:
+            p = data.pages[0]
+            v = p.tags['x_resolution'].value
+            pix_size_x = v[1]/float(v[0])
+            v = p.tags['y_resolution'].value
+            pix_size_y = v[1]/float(v[0])
+    except  Exception:
+        pix_size_z=pix_size_x=pix_size_y=1.
 
     return (pix_size_z, pix_size_x, pix_size_y)
 
