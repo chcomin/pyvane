@@ -1,11 +1,11 @@
 """Utility functions for reading 3D images."""
 
+from xml.etree import cElementTree as etree
 import oiffile as oif
 import tifffile
 import numpy as np
 import czifile
-from xml.etree import cElementTree as etree
-from pyvesto.image import Image
+from .image import Image
 
 def read_img(path, channel=None, read_pix_size=True):
     """Read image from the disk. Supported formats are {'tif', 'tiff', 'oib', 'lsm', 'czi'}. The function

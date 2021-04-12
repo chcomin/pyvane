@@ -1,9 +1,9 @@
 """Wrapper function around compiled library for skeletonization."""
 
-import numpy as np
-import ctypes as ct
-from pyvesto.image import Image
 from pathlib import Path
+import ctypes as ct
+import numpy as np
+from .image import Image
 
 try:
     libskeleton = ct.CDLL(Path(__file__).parent/'libskeleton.so')

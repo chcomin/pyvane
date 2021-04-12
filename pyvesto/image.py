@@ -1,8 +1,8 @@
 """Image class used for storing image data."""
 
 from pathlib import Path
-import numpy as np
 import math
+import numpy as np
 import scipy.ndimage as ndi
 
 class Image:

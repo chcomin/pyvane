@@ -1,1 +1,2 @@
-from . import file_util, image, img_io, measure, segmentation, skeleton, util, graph, processor
+from . import (file_util, image, img_io, measure, processor, 
+               segmentation, skeleton, tortuosity, util)

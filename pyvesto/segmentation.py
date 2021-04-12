@@ -2,8 +2,8 @@
 
 import scipy.ndimage as ndi
 import numpy as np
-from pyvesto.image import Image
-import pyvesto.util as util
+from .image import Image
+from . import util
 
 def vessel_segmentation(img, threshold, sigma=None, radius=40, comp_size=500):
     """Blood vessel segmentation using adaptive thresholding. In short terms, for each

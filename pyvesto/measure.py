@@ -1,10 +1,10 @@
 """Blood vessel morphometry analysis."""
 
 import networkx as nx
-from pyvesto.graph.adjustment import path_length
 import numpy as np
 import scipy.ndimage as ndi
-from pyvesto.tortuosity import tortuosity as tort_func
+from .graph.adjustment import path_length
+from .tortuosity import tortuosity as tort_func
 
 def xy_roi_to_volume(img_roi, num_planes):
     """Convert 2D image to 3D by copying the same image `num_planes` times.

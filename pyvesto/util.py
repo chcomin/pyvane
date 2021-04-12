@@ -1,9 +1,9 @@
 """Utility functions for image and graph manipulation as well as some useful classes."""
 
-import scipy.ndimage as ndi
-import numpy as np
 import heapq
 import itertools
+import scipy.ndimage as ndi
+import numpy as np
 import networkx as nx
 
 try:
