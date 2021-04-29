@@ -5,7 +5,7 @@ import numpy as np
 from .image import Image
 from . import util
 
-def vessel_segmentation(img, threshold, sigma=None, radius=40, comp_size=500):
+def vessel_segmentation(img, threshold, sigma=None, radius=40, comp_size=500, hole_size=None):
     """Blood vessel segmentation using adaptive thresholding. In short terms, for each
     pixel, if img[pixel]-avg(img[window])>threshold the pixel is marked as blood vessel,
     where window is a region centered at the pixel. The function also removes connected
@@ -50,13 +50,13 @@ def vessel_segmentation(img, threshold, sigma=None, radius=40, comp_size=500):
     img_data_diffused = ndi.gaussian_filter(img_data, sigma=sigma/pix_size)
 
     if ndim==2:
-        img_final = _vessel_segmentation_2d(img_data_diffused, threshold, radius, comp_size)
+        img_final = _vessel_segmentation_2d(img_data_diffused, threshold, radius, comp_size, hole_size)
     elif ndim==3:
         img_final = _vessel_segmentation_3d(img_data_diffused, threshold, radius, comp_size)
 
     return Image(img_final.astype(np.uint8), img.path, pix_size=img.pix_size)
 
-def _vessel_segmentation_2d(img_data, threshold, radius=40, comp_size=500):
+def _vessel_segmentation_2d(img_data, threshold, radius=40, comp_size=500, hole_size=None):
     """Blood vessel segmentation of a 2D image. See function `vessel_segmentation` for details.
     """
 
@@ -64,7 +64,12 @@ def _vessel_segmentation_2d(img_data, threshold, radius=40, comp_size=500):
         img_data = img_data.astype(np.float)
 
     img_bin = adaptive_thresholding(img_data, threshold, radius)
-    img_final = util.remove_small_comp(img_bin, comp_size)
+    img_no_small_comp = util.remove_small_comp(img_bin, comp_size)
+    if hole_size is None:
+        img_final = img_no_small_comp
+    else:
+        img_no_small_hole = util.remove_small_comp(1-img_no_small_comp, hole_size)
+        img_final = 1 - img_no_small_hole
 
     return img_final
 

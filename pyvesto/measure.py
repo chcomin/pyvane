@@ -173,7 +173,11 @@ def num_branch_points(graph, img_roi=None):
     """
 
     degrees = dict(graph.degree())
-    bif_nodes, _ = zip(*filter(lambda item: item[1]>=3, degrees.items()))
+    degree_three_nodes = list(filter(lambda item: item[1]>=3, degrees.items()))
+    if len(degree_three_nodes)==0:
+        return 0
+
+    bif_nodes, _ = zip(*degree_three_nodes)
     if img_roi is not None:
         nodes_center = [tuple(graph.nodes[node]['center']) for node in bif_nodes]
         is_inside_roi = img_roi[tuple(zip(*nodes_center))]

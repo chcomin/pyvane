@@ -948,6 +948,9 @@ def remove_branches(graph, length_threshold, verbose=False):
     # Create priority queue for all branches smaller than `length_threshold`
     branch_small_edges = list(filter(lambda edge: edge[3]['is_branch'] and edge[3]['length']<length_threshold,
                                      graph.edges(data=True, keys=True)))
+    if len(branch_small_edges)==0:
+        return
+
     branch_small_edges = map(lambda edge: (edge[3]['length'], (edge[0], edge[1], edge[2])), branch_small_edges)
     lengths, edges = zip(*branch_small_edges)
     branch_queue = util.PriorityQueue(lengths, edges)
@@ -1078,8 +1081,9 @@ def adjust_graph(graph, length_threshold, keep_nodes=False, collapse_indices=Tru
 
     if not keep_nodes:
         zero_degree_nodes = list(filter(lambda x: x[1]==0, dict(new_graph.degree()).items()))
-        zero_degree_nodes = list(zip(*zero_degree_nodes))[0]
-        new_graph.remove_nodes_from(zero_degree_nodes)
+        if len(zero_degree_nodes)>0:
+            zero_degree_nodes = list(zip(*zero_degree_nodes))[0]
+            new_graph.remove_nodes_from(zero_degree_nodes)
 
         if collapse_indices:
             new_graph = nx.convert_node_labels_to_integers(new_graph, ordering='default', label_attribute='old_id')
