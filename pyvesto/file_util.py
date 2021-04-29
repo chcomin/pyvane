@@ -501,13 +501,15 @@ def get_file_tag(file, directory=None, sep='@', include_ext=False):
             tag = sep.join(file_parts)
         else:
             tag = sep.join(file_parts[:-1])
-            tag += sep+file.stem
+            if len(tag)>0:
+                tag += sep+file.stem
+            else:
+                tag = file.stem
 
         return tag
 
 def flatten_directory(in_folder, out_folder, name_filter=None, sep='@'):
 
-    in_folder = Path(in_folder)
     in_folder = Path(in_folder)
     directory = in_folder.parts[-1]
     _, files = get_files(in_folder, name_filter)
