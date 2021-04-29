@@ -4,6 +4,7 @@ import os
 import pickle
 from functools import partial
 from collections import defaultdict
+from contextlib import nullcontext
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,7 +20,7 @@ class BasePipeline:
     DEFAULT_STEPS = ('segmentation', 'skeletonization', 'network', 'analysis')
     DIRECTORY_NAMES = ('binary', 'skeleton', 'network', 'results')
 
-    def __init__(self, input_path, img_reader, batch_name=None, output_path='./', result_format='disk', name_filter=None, save_steps='all',
+    def __init__(self, input_path, img_reader=None, batch_name=None, output_path='./', result_format='disk', name_filter=None, save_steps='all',
                  start_at=0, verbosity=0):
         """Class for segmenting, representing and characterizing 2D or 3D blood vessel images. The
             methods contained here are very specific to some analyses done by Prof. Cesar Comin. They should
@@ -105,8 +106,8 @@ class BasePipeline:
             files.remove('maximum_projection')
 
         start_at = self.start_at
-        if start_at==0:
-            first_index = 0
+        if isinstance(start_at, int):
+            first_index = start_at
         else:
             first_index = None
             for idx, file in enumerate(files):
@@ -114,8 +115,7 @@ class BasePipeline:
                     first_index = idx
                     break
             if first_index is None:
-                print('Warning, tried to start at file {start_at} but the file was not found. Starting from the beginning')
-                first_index = 0
+                raise ValueError('Warning, tried to start at file {start_at} but the file was not found.')
         files = files[first_index:]
 
         return files
@@ -146,42 +146,49 @@ class BasePipeline:
             if not os.path.isdir(output_path_step):
                 os.mkdir(output_path_step)
 
+        output_path_res = output_path/'results'
+        if not os.path.isdir(output_path_res):
+            os.mkdir(output_path_res)
+
     def run(self):
 
+        result_format = self.result_format
+        if result_format=='disk':
+            output_file = f'{self.output_path}/{self.DIRECTORY_NAMES[-1]}/{self.batch_name}.tsv'
+
         num_files = len(self.files)
-        results = {}
+        self.results = {}
         for idx, file in enumerate(self.files):
             filename = file.stem
             if self.verbosity:
                 print(f'Processing file {filename} ({idx+1} of {num_files})...')
 
             measurements = self._run_one_file(file)
-            results[filename] = measurements
+            self.results[filename] = measurements
 
-        result_format = self.result_format
-        if 'analysis' in self.run_steps:
-            if result_format=='dict':
-                pass
-            elif result_format=='table' or result_format=='disk':
-                results = self.generate_table(results)
-                if result_format=='disk':
-                    output_file = f'{self.output_path}/{self.DIRECTORY_NAMES[-1]}/{self.batch_name}.tsv'
-                    open(output_file, 'w').write(results)
-                else:
-                    return results
+            if measurements is not None and result_format=='disk':
+                if idx==0:
+                    with open(output_file, 'w') as output_fd:
+                        header = self.generate_header(measurements.keys())
+                        output_fd.write(header)
+                with open(output_file, 'a') as output_fd:
+                    line_str = self.generate_line(filename, measurements)
+                    output_fd.write(line_str)
+
+        return self.results
 
     def _run_one_file(self, file):
 
         filename = file.stem
 
-        img = self.img_reader(file)
-        is_3d = img.ndim==3
-        if is_3d:
-            img_proj = np.max(img.data, 0)
-            output_dir = self.output_path/'original'
-            self.save_object_proj(output_dir, filename, img, False, img_proj)
-
         if 'segmentation' in self.run_steps:
+            img = self.img_reader(file)
+            is_3d = img.ndim==3
+            if is_3d:
+                img_proj = np.max(img.data, 0)
+                output_dir = self.output_path/'original'
+                self.save_object_proj(output_dir, filename, img, False, img_proj)
+
             img = self.segmenter(img, file)
             if 'segmentation' in self.save_steps:
                 output_dir = self.get_output_directory('segmentation')
@@ -190,20 +197,21 @@ class BasePipeline:
         else:
             input_dir = self.get_output_directory('segmentation')
             try:
-                img = pickle.load(input_dir/f'{filename}.pickle')
+                img = pickle.load(open(input_dir/f'{filename}.pickle', 'rb'))
             except FileNotFoundError:
                 raise FileNotFoundError("No processor for segmentation step and no binary image found.")
 
         if 'skeletonization' in self.run_steps:
             img = self.skeleton_builder(img, file)
+            is_3d = img.ndim==3
             if 'skeletonization' in self.save_steps:
                 output_dir = self.get_output_directory('skeletonization')
                 img_proj = np.max(img.data, axis=0) if is_3d else img.data
                 self.save_object_proj(output_dir, filename, img, True, img_proj, 'gray')
-        else:
+        elif 'network' in self.run_steps:
             input_dir = self.get_output_directory('skeletonization')
             try:
-                img = pickle.load(input_dir/f'{filename}.pickle')
+                img = pickle.load(open(input_dir/f'{filename}.pickle', 'rb'))
             except FileNotFoundError:
                 raise FileNotFoundError("No processor for skeletonization step and no skeleton image found.")
 
@@ -212,10 +220,10 @@ class BasePipeline:
             if 'network' in self.save_steps:
                 output_dir = self.get_output_directory('network')
                 self.save_graph(output_dir, filename, network, True)
-        else:
+        elif 'analysis' in self.run_steps:
             input_dir = self.get_output_directory('network')
             try:
-                network = pickle.load(input_dir/f'{filename}.pickle')
+                network = pickle.load(open(input_dir/f'{filename}.pickle', 'rb'))
             except FileNotFoundError:
                 raise FileNotFoundError("No processor for network step and no graph file found.")
 
@@ -232,19 +240,32 @@ class BasePipeline:
 
         return self.output_path/directory
 
+    def generate_header(self, column_names):
+
+        header = 'Name'
+        for name in column_names:
+            header += f"\t{name}"
+        header = header+'\n'  
+
+        return header      
+
+    def generate_line(self, filename, measurements):
+
+        line_str = f'{filename}'
+        for key, value in measurements.items():
+            line_str += f'\t{value}'
+        line_str += '\n'
+
+        return line_str
+
     def generate_table(self, results):
         """Generate nice table containing blood vessel morphometry."""
 
-        header = 'Name'
-        for key in results[0]:
-            header += f"\t{key}"
-        table_str = header+'\n'
-        for filename in results:
-            graph_meas = results[filename]
-            line_str += f'{filename}'
-            for key, value in graph_meas.items():
-                line_str += f'\t{value}'
-            table_str += line_str+'\n'
+        header = self.generate_header(results[first_filename].keys())
+        table_str = header
+        for filename, measurements in results.items():
+            line_str = self.generate_line(filename, measurements)
+            table_str += line_str
 
         return table_str
 
@@ -307,7 +328,7 @@ class BaseProcessor:
 
 class DefaultSegmenter(BaseProcessor):
 
-    def __init__(self, threshold, sigma, radius=40, comp_size=500, batch_name=None):
+    def __init__(self, threshold, sigma, radius=40, comp_size=500, hole_size=None, batch_name=None):
 
         if isinstance(threshold, str):
             threshold = self.load_thresholds(threshold, batch_name)
@@ -321,6 +342,7 @@ class DefaultSegmenter(BaseProcessor):
         self.sigma = sigma
         self.radius = radius
         self.comp_size = comp_size
+        self.hole_size = hole_size
         self.batch_name = batch_name
 
     def apply(self, img, file):
@@ -328,7 +350,8 @@ class DefaultSegmenter(BaseProcessor):
         filename = file.stem
         threshold = self.threshold[filename]
 
-        return segmentation.vessel_segmentation(img, threshold, sigma=self.sigma, radius=self.radius, comp_size=self.comp_size)
+        return segmentation.vessel_segmentation(img, threshold, sigma=self.sigma, radius=self.radius, comp_size=self.comp_size, 
+                        hole_size=self.hole_size)
 
     def load_thresholds(self, filename, batch_name):
         """Load file containing the thresholds for blood vessel segmentation."""
@@ -390,7 +413,7 @@ class DefaultAnalyzer(BaseProcessor):
                                                     scale_factor=1e-3)
         tortuosity = measure.tortuosity(graph, self.tortuosity_scale, True)     
 
-        measurements = {'length':length, 'num_branches':num_branches, 'tortuosity':tortuosity}  
+        measurements = {'Length (mm/mm^3)':length, 'Branching points (1/mm^3)':num_branches, 'Tortuosity':tortuosity}  
 
         return measurements
 
@@ -406,20 +429,24 @@ class AuxiliaryPipeline(BasePipeline):
 
     def set_processors(self, segmenter):
 
-        ref_segmenter = copy.deepcopy(segmenter)
-        ref_segmenter.comp_size = 0
-
         self.segmenter = segmenter
-        self.ref_segmenter = ref_segmenter
+        self.create_folders()
 
+    def create_folders(self):
 
-    def try_thresholds(self, threshold_values, output_path):
-
-        files = self.files
-
+        output_path = self.output_path
         if not os.path.isdir(output_path):
             os.mkdir(output_path)
 
+        output_path_thresholded = output_path/'threshold_tests'
+        if not os.path.isdir(output_path_thresholded):
+            os.mkdir(output_path_thresholded)
+
+    def try_thresholds(self, threshold_values):
+
+        files = self.files
+        output_path = self.output_path/'threshold_tests'
+        
         num_files = len(files)
         for idx, file in enumerate(files):
 
@@ -428,10 +455,13 @@ class AuxiliaryPipeline(BasePipeline):
                 print(f'Processing file {filename} ({idx+1} of {num_files})...')
 
             img = self.img_reader(file)
-
             for threshold in threshold_values:
+                self.segmenter.threshold = defaultdict((lambda threshold: (lambda:threshold))(threshold))
+                ref_segmenter = copy.deepcopy(self.segmenter)
+                ref_segmenter.comp_size = 0
+
                 img_bin = self.segmenter(img, file)
-                img_bin_all_comps = self.ref_segmenter(img, file)
+                img_bin_all_comps = ref_segmenter(img, file)
 
                 img_bin_np = img_bin.data
                 img_diff = np.logical_xor(img_bin_np, img_bin_all_comps.data)
@@ -443,8 +473,7 @@ class AuxiliaryPipeline(BasePipeline):
                 else:
                     img_proj_out = img_final_diff
 
-                file_tag = self.get_file_tag(file)
-                plt.imsave(output_path/f'{file_tag}_{threshold:.1f}.png', img_proj_out, cmap='hot')
+                plt.imsave(output_path/f'{filename}_{threshold:.1f}.png', img_proj_out, cmap='hot')
 
     def verify_results(self, output_file):
 
