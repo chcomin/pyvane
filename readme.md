@@ -8,12 +8,12 @@ Functions are provided for measuring blood vessel density, number of bifurcation
 
 PyVesTo has been used in the following publications:
 
-* McDonald, Matthew W., Matthew S. Jeffers, Lama Issa, Anthony Carter, Allyson Ripley, Lydia M. Kuhl, Cameron Morse et al. "An Exercise Mimetic Approach to Reduce Poststroke Deconditioning and Enhance Stroke Recovery." Neurorehabilitation and Neural Repair 35, no. 6 (2021): 471-485.
-* Ouellette, Julie, Xavier Toussay, Cesar H. Comin, Luciano da F. Costa, Mirabelle Ho, María Lacalle-Aurioles, Moises Freitas-Andrade et al. "Vascular contributions to 16p11. 2 deletion autism syndrome modeled in mice." Nature Neuroscience 23, no. 9 (2020): 1090-1101.
-* Boisvert, Naomi C., Chet E. Holterman, Jean-François Thibodeau, Rania Nasrallah, Eldjonai Kamto, Cesar H. Comin, Luciano da F. Costa et al. "Hyperfiltration in ubiquitin C-terminal hydrolase L1-deleted mice." Clinical Science 132, no. 13 (2018): 1453-1470.
-* Gouveia, Ayden, Matthew Seegobin, Timal S. Kannangara, Ling He, Fredric Wondisford, Cesar H. Comin, Luciano da F. Costa et al. "The aPKC-CBP pathway regulates post-stroke neurovascular remodeling and functional recovery." Stem cell reports 9, no. 6 (2017): 1735-1744.
-* Kur, Esther, Jiha Kim, Aleksandra Tata, Cesar H. Comin, Kyle I. Harrington, Luciano da F Costa, Katie Bentley, and Chenghua Gu. "Temporal modulation of collective cell behavior controls vascular network topology." Elife 5 (2016): e13212.
-* Lacoste, Baptiste, Cesar H. Comin, Ayal Ben-Zvi, Pascal S. Kaeser, Xiaoyin Xu, Luciano da F. Costa, and Chenghua Gu. "Sensory-related neural activity regulates the structure of vascular networks in the cerebral cortex." Neuron 83, no. 5 (2014): 1117-1130.
+* McDonald, Matthew W., Matthew S. Jeffers, Lama Issa, Anthony Carter, Allyson Ripley, Lydia M. Kuhl, Cameron Morse et al. "An Exercise Mimetic Approach to Reduce Poststroke Deconditioning and Enhance Stroke Recovery." **Neurorehabilitation and Neural Repair** 35, no. 6 (2021): 471-485.
+* Ouellette, Julie, Xavier Toussay, Cesar H. Comin, Luciano da F. Costa, Mirabelle Ho, María Lacalle-Aurioles, Moises Freitas-Andrade et al. "Vascular contributions to 16p11. 2 deletion autism syndrome modeled in mice." **Nature Neuroscience** 23, no. 9 (2020): 1090-1101.
+* Boisvert, Naomi C., Chet E. Holterman, Jean-François Thibodeau, Rania Nasrallah, Eldjonai Kamto, Cesar H. Comin, Luciano da F. Costa et al. "Hyperfiltration in ubiquitin C-terminal hydrolase L1-deleted mice." **Clinical Science** 132, no. 13 (2018): 1453-1470.
+* Gouveia, Ayden, Matthew Seegobin, Timal S. Kannangara, Ling He, Fredric Wondisford, Cesar H. Comin, Luciano da F. Costa et al. "The aPKC-CBP pathway regulates post-stroke neurovascular remodeling and functional recovery." **Stem cell reports** 9, no. 6 (2017): 1735-1744.
+* Kur, Esther, Jiha Kim, Aleksandra Tata, Cesar H. Comin, Kyle I. Harrington, Luciano da F Costa, Katie Bentley, and Chenghua Gu. "Temporal modulation of collective cell behavior controls vascular network topology." **Elife** 5 (2016): e13212.
+* Lacoste, Baptiste, Cesar H. Comin, Ayal Ben-Zvi, Pascal S. Kaeser, Xiaoyin Xu, Luciano da F. Costa, and Chenghua Gu. "Sensory-related neural activity regulates the structure of vascular networks in the cerebral cortex." **Neuron** 83, no. 5 (2014): 1117-1130.
 
 ### 3D Blood Vessel Image
 
