@@ -320,10 +320,10 @@ class BaseProcessor:
     def __init__(self):
         pass
 
-    def __call__(self, img, file):
+    def __call__(self, img, file=None):
         return self.apply(img, file)
 
-    def apply(self, img, file):
+    def apply(self, img, file=None):
         pass
 
 class DefaultSegmenter(BaseProcessor):
@@ -345,7 +345,7 @@ class DefaultSegmenter(BaseProcessor):
         self.hole_size = hole_size
         self.batch_name = batch_name
 
-    def apply(self, img, file):
+    def apply(self, img, file=None):
 
         filename = file.stem
         threshold = self.threshold[filename]
@@ -380,7 +380,7 @@ class DefaultSkeletonBuilder(BaseProcessor):
         self.num_threads = num_threads
         self.verbosity = verbosity
 
-    def apply(self, img, file):
+    def apply(self, img, file=None):
 
         return skeleton.skeletonize(img, num_threads=self.num_threads, verbosity=self.verbosity)
 
@@ -391,7 +391,7 @@ class DefaultNetworkBuilder(BaseProcessor):
         self.length_threshold = length_threshold
         self.verbosity = verbosity
 
-    def apply(self, img, file):
+    def apply(self, img, file=None):
 
         graph = create_graph(img, verbose=(self.verbosity>=3))
         graph_simple = net_adjust.simplify(graph, False, verbose=(self.verbosity>=3))
@@ -405,7 +405,7 @@ class DefaultAnalyzer(BaseProcessor):
 
         self.tortuosity_scale = tortuosity_scale
 
-    def apply(self, graph, file):
+    def apply(self, graph, file=None):
 
         img_roi = self.load_roi(file)
         length = measure.vessel_density(graph, graph.graph['shape'], img_roi=img_roi, scale_factor=1e-3)
@@ -475,7 +475,7 @@ class AuxiliaryPipeline(BasePipeline):
 
                 plt.imsave(output_path/f'{filename}_{threshold:.1f}.png', img_proj_out, cmap='hot')
 
-    def verify_results(self, output_file):
+    def verify_results(self):
 
         files = self.files
         num_files = 2*len(files)
@@ -486,8 +486,9 @@ class AuxiliaryPipeline(BasePipeline):
             img = self.img_reader(file)
 
             output_graph_img = self.output_path/self.DIRECTORY_NAMES[2]/'maximum_projection'/f'{filename}.png'
-            img_graph = pickle.load(open(output_graph_img, 'rb'))
-            img_graph = img_graph[:,:,0]
+            img_graph = plt.imread(output_graph_img)
+            #img_graph = pickle.load(open(output_graph_img, 'rb'))
+            img_graph = 255*img_graph[:,:,0]
 
             if img.ndim>=3:
                 img_proj = np.max(img.data, axis=0)
@@ -497,11 +498,11 @@ class AuxiliaryPipeline(BasePipeline):
             if idx==0:
                 verification_stack = np.zeros((num_files, img_proj.shape[0], img_proj.shape[1]), dtype=np.uint8)
 
-            verification_stack[2*idx] = np.round(img.data).astype(int)
-            verification_stack[2*idx+1] = img_graph
+            verification_stack[2*idx] = np.round(img_proj).astype(int)
+            verification_stack[2*idx+1] = np.round(img_graph).astype(int)
 
 
-        tifffile.imsave(output_file, verification_stack)
+        tifffile.imsave(self.output_path/'verification.tif', verification_stack)
 
 def read_and_adjust_img(file, channel=0, roi=None):
     """Read image form disk, transform its data to float, apply the linear transformation
