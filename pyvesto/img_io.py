@@ -35,6 +35,9 @@ def read_img(path, channel=None, read_pix_size=True):
         reader_func = read_lsm
     elif file_type == 'czi':
         reader_func = read_czi
+    else:
+        raise RuntimeError(f"Image type '{file_type}' is not supported by the image reader."
+            " Current supported extensions: 'tif/tiff', 'oib', 'lsm', 'czi'.")
 
     img_data = reader_func(path, read_pix_size)
     if read_pix_size:
