@@ -521,13 +521,19 @@ def read_and_adjust_img(file, channel=0, roi=None):
 
     return img
 
-def build_default_pipeline(input_path, output_path='./', channel=0, name_filter=None, only_analyze=False,
+def build_default_pipeline(input_path, output_path='./', channel=None, name_filter=None, only_analyze=False,
                            start_at=0, verbosity=0):
 
     img_reader = partial(read_and_adjust_img, channel=channel)
 
     bp = BasePipeline(input_path, img_reader, output_path=output_path, name_filter=name_filter, start_at=start_at, verbosity=verbosity)
-    bp.set_processors(DefaultSegmenter, DefaultSkeletonBuilder, DefaultNetworkBuilder, DefaultAnalyzer)
+
+    segmenter = DefaultSegmenter(0, None)
+    skeleton_builder = DefaultSkeletonBuilder()
+    network_builder = DefaultNetworkBuilder()
+    analyzer = DefaultAnalyzer(5)
+
+    bp.set_processors(segmenter, skeleton_builder, network_builder, analyzer)
 
     return bp
 
