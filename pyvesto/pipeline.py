@@ -154,6 +154,9 @@ class BasePipeline:
         if not os.path.isdir(output_path):
             os.mkdir(output_path)
 
+        if not os.path.isdir(output_path/'original'):
+            os.mkdir(output_path/'original')
+        
         for step in self.save_steps:
             step_idx = self.DEFAULT_STEPS.index(step)
             directory = self.DIRECTORY_NAMES[step_idx]
