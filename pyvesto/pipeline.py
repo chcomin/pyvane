@@ -38,13 +38,9 @@ class BasePipeline:
                 How to save the results. If 'disk', a csv file is saved on the disk.
             name_filter : func
                 Function for filtering the files. Returns True if the file should be processd and False otherwise.
-            run_steps : dict
-                Dictionary containing the processing steps to run. Has the form {'segmentation':{True,False},
-                'skeletonization':{True,False}, 'network':{True,False}, 'analysis':{True,False}}
-            save_steps : dict
-                Dictionary containing which intermediary data should be saved on disk. Has the form
-                {'segmentation':{True,False}, 'skeletonization':{True,False}, 'network-original':{True,False},
-                'network-simple':{True,False}, 'network-final':{True,False}}
+            save_steps : str or tuple of str
+                A tuple of strings containing which intermediate data should be saved on disk. 
+                The default behaviour (`save_steps` == 'all') is to save all intermediate steps: ('segmentation', 'skeletonization', 'network', 'analysis').
             start_at : int or str, optional
                 Given the list of images to process, start at this index. If 0 or None, all images are processed.
             roi_process_func : tuple of slice, optional
@@ -82,21 +78,38 @@ class BasePipeline:
         self.start_at = start_at
         self.verbosity = verbosity
 
-        files = self.prepare_files()
+        files = self._prepare_files()
         self.files = files
         self.storage = {}
         self.run_steps = []
 
     def set_processors(self, segmenter=None, skeleton_builder=None, network_builder=None, analyzer=None):
+        """Sets the sequence of subroutines (processors) that PyVesTo will execute in the morphometry pipeline.
+        Each subroutine must inherit BaseProcessor and override the apply() method. Besides, it creates
+        all folders needed to save the data from the processors.
+        
+        Parameters
+        ----------
+        segmenter: BaseProcessor
+            A class for segmenting the input images. On apply() should return an image.Image object.
+        skeleton_builder: BaseProcessor
+            A class that builds a skeleton given an image of segmented blood vessels. On apply() must return an image.Image object.
+        network_builder: BaseProcessor
+            A class that builds a graph given the skeleton of a blood vessel network. On apply() must return a Networkx.MultiGraph object
+            with the image shape passed as an attribute.
+        analyzer: BaseProcessor
+            A class that calculates the desired morphological features given the network obtained in the previous processor. On apply()
+            it must return a dictionary with each feature as a key.
+        """
 
         self.segmenter = segmenter
         self.skeleton_builder = skeleton_builder
         self.network_builder = network_builder
         self.analyzer = analyzer
         self._generate_steps()
-        self.create_folders()
+        self._create_folders()
 
-    def prepare_files(self):
+    def _prepare_files(self):
         """Obtain list of files for processing and generate necessary folders for saving intermediary
         steps of the pipeline (segmented blood vessels, skeleton, etc)."""
 
@@ -121,6 +134,7 @@ class BasePipeline:
         return files
 
     def _generate_steps(self):
+        """Sets the pipeline to run all default steps."""
 
         run_steps = []
         if self.segmenter is not None:
@@ -133,7 +147,8 @@ class BasePipeline:
             run_steps.append('analysis')
         self.run_steps = run_steps
 
-    def create_folders(self):
+    def _create_folders(self):
+        """Creates the folders needed to save the intermediate steps of the morphometry pipeline."""
 
         output_path = self.output_path
         if not os.path.isdir(output_path):
@@ -151,6 +166,7 @@ class BasePipeline:
             os.mkdir(output_path_res)
 
     def run(self):
+        """Runs the morphometry pipeline throughout the entire dataset."""
 
         result_format = self.result_format
         if result_format=='disk':
@@ -178,6 +194,7 @@ class BasePipeline:
         return self.results
 
     def _run_one_file(self, file):
+        """Runs the morphometry pipeline to a single file."""
 
         filename = file.stem
 
@@ -234,6 +251,18 @@ class BasePipeline:
         return measurements
 
     def get_output_directory(self, step):
+        """Gets the output directory given a step of the morphometry pipeline.
+        
+        Parameters
+        ----------
+        step: string
+            Morphometry step. It must be included in `self.DEFAULT_STEPS`.
+
+        Returns
+        ----------
+        Path
+            Output path.
+        """
 
         step_idx = self.DEFAULT_STEPS.index(step)
         directory = self.DIRECTORY_NAMES[step_idx]
@@ -241,6 +270,18 @@ class BasePipeline:
         return self.output_path/directory
 
     def generate_header(self, column_names):
+        """Organizes the column names as a table header.
+        
+        Parameters
+        ----------
+        column_names: list of str
+            List of column names.
+        
+        Returns
+        ----------
+        str
+            Table header as a string.
+        """
 
         header = 'Name'
         for name in column_names:
@@ -250,6 +291,20 @@ class BasePipeline:
         return header      
 
     def generate_line(self, filename, measurements):
+        """Generates a table line given the filename and the measures used in the pipeline.
+        
+        Parameters
+        ----------
+        filename: str or Path
+            Name of the file.
+        measurements: dict
+            Dictionary of used measurements. Has the form of {'measure1': value1, 'measure2: value2'}.
+
+        Returns
+        ----------
+        str
+            Table line as a string.
+        """
 
         line_str = f'{filename}'
         for key, value in measurements.items():
@@ -258,19 +313,8 @@ class BasePipeline:
 
         return line_str
 
-    def generate_table(self, results):
-        """Generate nice table containing blood vessel morphometry."""
-
-        header = self.generate_header(results[first_filename].keys())
-        table_str = header
-        for filename, measurements in results.items():
-            line_str = self.generate_line(filename, measurements)
-            table_str += line_str
-
-        return table_str
-
     def save_object_proj(self, directory, name, obj, save_obj=True, obj_proj=None, cmap=None):
-        """Save an object as a pickle file. Optionally, also save an image representing the object.
+        """Saves an object as a pickle file. Optionally, also save an image representing the object.
         This is useful for saving a 3D image together with a 2D projection or a graph and its
         respective image."""
 
@@ -291,7 +335,7 @@ class BasePipeline:
             plt.imsave(out_proj_dir/(name+'.png'), obj_proj, cmap=cmap)
 
     def save_graph(self, directory, name, graph, save_graph=True, cmap=None, node_pixels_color=(0, 0, 0)):
-        """Save a graph to disk."""
+        """Saves a graph to disk."""
 
         directory = Path(directory)
         img_graph = util.graph_to_img(graph, node_color=(255, 255, 255), node_pixels_color=node_pixels_color,
@@ -299,6 +343,7 @@ class BasePipeline:
         img_graph_proj = np.max(img_graph, 0) if img_graph.ndim==4 else img_graph   # Graph image has color
         self.save_object_proj(directory, name, graph, save_obj=save_graph, obj_proj=img_graph_proj, cmap=cmap)
 
+    # unused methods
     def print_batch_files(self, only_stem=True, replace_slash=None):
 
         if replace_slash is None:
@@ -315,20 +360,61 @@ class BasePipeline:
 
         return file_util.get_file_tag(file, self.input_path.stem)
 
+    def generate_table(self, results):
+        """Generates a nice table containing blood vessel morphometry."""
+
+        header = self.generate_header(results[first_filename].keys())
+        table_str = header
+        for filename, measurements in results.items():
+            line_str = self.generate_line(filename, measurements)
+            table_str += line_str
+
+        return table_str
+
 class BaseProcessor:
 
     def __init__(self):
+        """SuperClass for defining a PyVesTo subroutine, called processsor."""
         pass
 
     def __call__(self, img, file=None):
+        """Calls apply() when a BaseProcessor instance is called as a function."""
         return self.apply(img, file)
 
     def apply(self, img, file=None):
+        """The processor behaviour code goes here."""
         pass
 
 class DefaultSegmenter(BaseProcessor):
 
     def __init__(self, threshold, sigma, radius=40, comp_size=500, hole_size=None, batch_name=None):
+        """Class that defines a processor for segmenting blood vessels.
+        
+        Parameters
+        ----------
+        threshold: str, dict or float
+            Threshold used for adaptive thresholding. If a string is passed, the thresholds from each image
+            are read from a file through `load_thresholds`. The thresholds are stored in a dict with form
+            {'filename': threshold}. Likewise, `threshold` can be a dict already filled. Lastly if `threshold`
+            is a float, a dict with fixed thresholds for each file is created.
+            Pixels with values larger than avg(img[window])+threshold are blood vessel candidates, where window 
+            is a region centered at the pixel.
+        sigma: list or float, optional
+            Gaussian standard deviations for smoothing the image before thresholding. The values should
+            be given as physical units (e.g., micrometers). If None, unitary values are used.
+        radius: int
+            Window size to use for intensity averaging. Since a Gaussian is used, this is actually
+            2x the standard deviation of the Gaussian used for averaging pixel intensities. Note
+            that this Gaussian is different than the one defined by parameter `sigma`. The value
+            is in pixels.
+        comp_size : int
+            Connected components smaller than `comp_size` are removed from the image.
+        hole_size: int
+            Holes smaller than `hole_size` are filled out. Similar to the removal of connected
+            components applied with `comp_size`, but with the inverted image.
+        batch_name: str
+            Name of the batch containing the image.
+        """
 
         if isinstance(threshold, str):
             threshold = self.load_thresholds(threshold, batch_name)
@@ -346,7 +432,20 @@ class DefaultSegmenter(BaseProcessor):
         self.batch_name = batch_name
 
     def apply(self, img, file=None):
-
+        """Applies the segmentation from `segmentation.vessel_segmentation` to an image.
+        
+        Parameters
+        ----------
+        img: image.Image
+            An `image.Image` object containing the data to be segmented.
+        file: Path
+            Absolute path of `img`.
+        
+        Returns
+        ----------
+        image.Image
+            Segmented vessels of `img`.
+        """
         filename = file.stem
         threshold = self.threshold[filename]
 
@@ -354,7 +453,21 @@ class DefaultSegmenter(BaseProcessor):
                         hole_size=self.hole_size)
 
     def load_thresholds(self, filename, batch_name):
-        """Load file containing the thresholds for blood vessel segmentation."""
+        """Loads file containing the thresholds for blood vessel segmentation.
+        
+        Parameters
+        ----------
+        filename: str
+            Name of the image file being processed.
+        batch_name: str
+            Name of the batch containing the image.
+
+        Returns
+        ----------
+        dict
+            Dictionary with the thresholds for each image. Has the form:
+            {'filename': threshold}.
+        """
 
         data = open(filename, 'r').readlines()
 
@@ -376,22 +489,66 @@ class DefaultSegmenter(BaseProcessor):
 class DefaultSkeletonBuilder(BaseProcessor):
 
     def __init__(self, num_threads=1, verbosity=0):
-
+        """Class that defines a processor for the skeletonization of binary blood vessel images.
+        
+        Parameters
+        ----------
+        num_threads: int
+            Number of threads to use for calculating the skeleton.
+        verbosity: int
+            Verbosity level of the method. If 0, nothing is printed. If 1, the current iteration
+            index is printed. If larger than 1, saves an image with name temp.tif containing the
+            current skeleton each `verbosity` iterations. In some systems and terminals the values
+            might not be printed.
+        """
         self.num_threads = num_threads
         self.verbosity = verbosity
 
     def apply(self, img, file=None):
-
+        """Applies the skeletonization from `skeleton.skeletonize` to an image.
+        
+        Parameters
+        ----------
+        img: image.Image
+            Binary image. Must have only values 0 and 1.
+        file:
+            Not implemented yet.
+        """
         return skeleton.skeletonize(img, num_threads=self.num_threads, verbosity=self.verbosity)
 
 class DefaultNetworkBuilder(BaseProcessor):
 
     def __init__(self, length_threshold=10, verbosity=0):
-
+        """Class that defines a processor for building a graph given the skeleton of a blood vessel network.
+        
+        Parameters
+        ----------
+        length_threshold: float
+            Branches with size smalled than `length_threshold` are removed.
+        verbosity: int
+            Level of verbosity. If `verbosity` is greater than 3, the progress of create and adjust the graph
+            is printed.
+        """
+        
         self.length_threshold = length_threshold
         self.verbosity = verbosity
 
     def apply(self, img, file=None):
+        """Creates and adjust a graph to the binary image representing the skeleton of a vascular network. The generated graph
+        comprises a set of edges that represent the vessel segments of the image.
+        
+        Parameters
+        ----------
+        img: image.Image
+            A binary Image object representing the skeleton of the vascular network.
+        file:
+            Not implemented yet.
+
+        Returns
+        ----------
+        networkx.MultiGraph
+            A networkx.Multigraph graph containing the set of vessel segments of `img`.
+        """
 
         graph = create_graph(img, verbose=(self.verbosity>=3))
         graph_simple = net_adjust.simplify(graph, False, verbose=(self.verbosity>=3))
@@ -402,10 +559,36 @@ class DefaultNetworkBuilder(BaseProcessor):
 class DefaultAnalyzer(BaseProcessor):
 
     def __init__(self, tortuosity_scale):
+        """Class that defines a processor to analyze the graph representing the vascular network of an image.
+        
+        Parameters
+        ----------
+        tortuosity_scale: float
+            The scale at which the tortuosity will be calculated. That is, smaller values indicate
+            that the tortuosity should be calculated for local changes in direction of the blood vessels,
+            while larger values indicate that small changes should be ignored and only large variations
+            should be taken into account.
+        """
 
         self.tortuosity_scale = tortuosity_scale
 
     def apply(self, graph, file=None):
+        """Analyzes a graph and returns a set of features regarding the vascular network.
+        
+        Parameters
+        ----------
+        graph: networkx.MultiGraph
+            A graph containing the set of vessel segments of a vascular network.
+        file: Not implemented yet.
+
+        Returns
+        ----------
+        measurements: dict
+            A dictionary with some features of the network:
+                `Length (mm/mm^3)`:  Density of blood vessels. ((total length of vessels) / (volume)).
+                `Branching points (1/mm^3):` Density of branching points ((number of branching points) / (volume)).
+                `Tortuosity`: Average tortuosity of the vessels, at the scale defined in `self.tortuosity_scale`.
+        """
 
         img_roi = self.load_roi(file)
         length = measure.vessel_density(graph, graph.graph['shape'], img_roi=img_roi, scale_factor=1e-3)
@@ -418,21 +601,32 @@ class DefaultAnalyzer(BaseProcessor):
         return measurements
 
     def load_roi(self, file):
+        """Not implemented yet."""
 
         return None
         
 class AuxiliaryPipeline(BasePipeline):
     
     def __init__(self, *args, **kwargs):
+        """Class that defines a pipeline for testing threshold values for the segmentation of blood vessel images.
+        This class inherits `BasePipeline` and have no additional arguments."""
 
         super().__init__(*args, **kwargs)
 
     def set_processors(self, segmenter):
+        """Sets the sequence of that will be exeucted in the auxiliary pipeline. In this case, just the segmentation.
+        
+        Parameters
+        ----------
+        segmenter: BaseProcessor
+            A class for segmenting the input images. On apply() it should return an image.Image object.
+        """
 
         self.segmenter = segmenter
-        self.create_folders()
+        self._create_folders()
 
-    def create_folders(self):
+    def _create_folders(self):
+        """Create the folders needed to save the intermediate steps of the morphometry pipeline."""
 
         output_path = self.output_path
         if not os.path.isdir(output_path):
@@ -443,6 +637,16 @@ class AuxiliaryPipeline(BasePipeline):
             os.mkdir(output_path_thresholded)
 
     def try_thresholds(self, threshold_values):
+        """Tries a list of thresholds for the segmentation of a blood vessel image dataset.
+        For each threshold value, the segmentation result is compared to the same segmentation approach
+        but without the removal of small connected components. Then, for each threshold value, an image is 
+        plotted (on `self.output_path` folder) depicting the intersection and the union these two segmentations.
+
+        Parameters
+        ----------
+        threshold_values: list of float
+            List of thresholds to be tried.
+        """
 
         files = self.files
         output_path = self.output_path/'threshold_tests'
@@ -466,7 +670,7 @@ class AuxiliaryPipeline(BasePipeline):
                 img_bin_np = img_bin.data
                 img_diff = np.logical_xor(img_bin_np, img_bin_all_comps.data)
                 img_final_diff = img_bin_np.astype(np.uint8)*2
-                img_final_diff[img_diff] = 1		
+                img_final_diff[img_diff] = 1
 
                 if img_final_diff.ndim==3:
                     img_proj_out = np.max(img_final_diff, axis=0)
@@ -476,6 +680,8 @@ class AuxiliaryPipeline(BasePipeline):
                 plt.imsave(output_path/f'{filename}_{threshold:.1f}.png', img_proj_out, cmap='hot')
 
     def verify_results(self):
+        """Creates a stack from each `self.files` image and its generated graph. The stack is saved in
+        `self.output_path/verification.tif`."""
 
         files = self.files
         num_files = 2*len(files)
@@ -504,9 +710,22 @@ class AuxiliaryPipeline(BasePipeline):
 
         tifffile.imsave(self.output_path/'verification.tif', verification_stack)
 
-def read_and_adjust_img(file, channel=0, roi=None):
-    """Read image form disk, transform its data to float, apply the linear transformation
-    [min, max]->[0, 255] and interpolate the image to make it isotropic."""
+def read_and_adjust_img(file, channel=None, roi=None):
+    """Reads image form disk, transform its data to float, apply the linear transformation
+    [min, max]->[0, 255] and interpolate the image to make it isotropic.
+    
+    Parameters
+    ----------
+    file: Path or str
+        Location of the image.
+    channel: int
+        Channel to be processed. If None, all channels will be considered.
+
+    Returns
+    ----------
+    image.Image
+        Adjusted image.
+    """
 
     img = img_io.read_img(file, channel=channel)
     if roi is not None:
@@ -520,21 +739,3 @@ def read_and_adjust_img(file, channel=0, roi=None):
     img.make_isotropic()
 
     return img
-
-def build_default_pipeline(input_path, output_path='./', channel=None, name_filter=None, only_analyze=False,
-                           start_at=0, verbosity=0):
-
-    img_reader = partial(read_and_adjust_img, channel=channel)
-
-    bp = BasePipeline(input_path, img_reader, output_path=output_path, name_filter=name_filter, start_at=start_at, verbosity=verbosity)
-
-    segmenter = DefaultSegmenter(0, None)
-    skeleton_builder = DefaultSkeletonBuilder()
-    network_builder = DefaultNetworkBuilder()
-    analyzer = DefaultAnalyzer(5)
-
-    bp.set_processors(segmenter, skeleton_builder, network_builder, analyzer)
-
-    return bp
-
-    
