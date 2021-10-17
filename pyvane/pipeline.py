@@ -713,7 +713,7 @@ class AuxiliaryPipeline(BasePipeline):
 
         tifffile.imsave(self.output_path/'verification.tif', verification_stack)
 
-def read_and_adjust_img(file, channel=None, roi=None):
+def read_and_adjust_img(file, channel=None, stretch_range=True, roi=None):
     """Reads image form disk, transform its data to float, apply the linear transformation
     [min, max]->[0, 255] and interpolate the image to make it isotropic.
     
@@ -738,7 +738,8 @@ def read_and_adjust_img(file, channel=None, roi=None):
     if img_dtype!=np.uint16 and img_dtype!=np.uint8:
         raise ValueError(f'Pixel data type is {img_dtype}, but should be either uint8 or uint16.')
     img.to_float()
-    img.stretch_data_range(255)
+    if stretch_range:
+        img.stretch_data_range(255)
     img.make_isotropic()
 
     return img
