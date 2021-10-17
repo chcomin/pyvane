@@ -714,7 +714,7 @@ class AuxiliaryPipeline(BasePipeline):
         tifffile.imsave(self.output_path/'verification.tif', verification_stack)
 
 def read_and_adjust_img(file, channel=None, stretch_range=True, roi=None):
-    """Reads image form disk, transform its data to float, apply the linear transformation
+    """Reads image from disk, transform its data to float, apply the linear transformation
     [min, max]->[0, 255] and interpolate the image to make it isotropic.
     
     Parameters

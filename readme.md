@@ -1,8 +1,8 @@
-# Python Blood Vessel Topology Analysis
+# Python Vascular Network Analysis
 
 ![Example](docs/readme_imgs/video.gif)
 
-**Py**thon Blood **Ves**sel **To**pology Analysis (PyVaNe) is a framework for analysing blood vessel digital images. This includes the segmentation, representation and characterization of blood vessels. The framework identifies 2D and 3D vascular systems and represent them using graphs. The graphs describe the **topology** of the blood vessels, that is, bifurcations and terminations are represented as nodes and two nodes are connected if there is a blood vessel segment between them.
+**Py**thon  **Va**scular **Ne**twork Analysis (PyVaNe) is a framework for analysing blood vessel digital images. This includes the segmentation, representation and characterization of blood vessels. The framework identifies 2D and 3D vascular systems and represent them using graphs. The graphs describe the **topology** of the blood vessels, that is, bifurcations and terminations are represented as nodes and two nodes are connected if there is a blood vessel segment between them.
 
 Functions are provided for measuring blood vessel density, number of bifurcation points and tortuosity, but other metrics can be implemented. The created graphs are objects from the [Networkx](https://networkx.org/) libray.
 
