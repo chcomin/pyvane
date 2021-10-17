@@ -1,4 +1,4 @@
-pyvesto
+pyvane
 =======
 
 .. toctree::

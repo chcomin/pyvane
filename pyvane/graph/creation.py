@@ -7,7 +7,7 @@
 import numpy as np
 from scipy import ndimage as ndi
 import networkx as nx
-import pyvesto.util as util
+import pyvane.util as util
 
 class InterestPoint:
     """Class representing a termination or bifurcation point.

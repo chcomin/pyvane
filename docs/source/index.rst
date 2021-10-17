@@ -1,9 +1,9 @@
-.. pyvesto documentation master file, created by
+.. pyvane documentation master file, created by
    sphinx-quickstart on Mon Jan 11 22:38:21 2021.
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to pyvesto's documentation!
+Welcome to pyvane's documentation!
 ===================================
 
 .. toctree::
@@ -13,48 +13,48 @@ Welcome to pyvesto's documentation!
 .. autosummary::
      :toctree: stubs
 
-     pyvesto.segmentation
+     pyvane.segmentation
    
 Segmentation routines
 ---------------------
 	
-.. automodule:: pyvesto.segmentation
+.. automodule:: pyvane.segmentation
     :members:
 	
 Graph creation
 ----------------
 
-.. automodule:: pyvesto.graph.creation
+.. automodule:: pyvane.graph.creation
     :members:
 
 Graph manipulation
 --------------------
 	
-.. automodule:: pyvesto.graph.adjustment
+.. automodule:: pyvane.graph.adjustment
     :members:
 	
 Image class
 --------------
 
-.. automodule:: pyvesto.image
+.. automodule:: pyvane.image
     :members:
 	
 Image input and output
 ----------------------
 
-.. automodule:: pyvesto.img_io
+.. automodule:: pyvane.img_io
     :members:
 	
 Utilities
 ---------
 
-.. automodule:: pyvesto.util
+.. automodule:: pyvane.util
     :members:
 	
 File utilities
 --------------
 
-.. automodule:: pyvesto.file_util
+.. automodule:: pyvane.file_util
     :members:
 
 

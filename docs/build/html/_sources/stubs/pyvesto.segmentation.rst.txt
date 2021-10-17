@@ -1,7 +1,7 @@
-﻿pyvesto.segmentation
+﻿pyvane.segmentation
 ====================
 
-.. automodule:: pyvesto.segmentation
+.. automodule:: pyvane.segmentation
 
    
    

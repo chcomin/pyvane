@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.abspath('../../'))
 
 # -- Project information -----------------------------------------------------
 
-project = 'pyvesto'
+project = 'pyvane'
 copyright = '2021, Cesar Henrique Comin'
 author = 'Cesar Henrique Comin'
 

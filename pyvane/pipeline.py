@@ -84,7 +84,7 @@ class BasePipeline:
         self.run_steps = []
 
     def set_processors(self, segmenter=None, skeleton_builder=None, network_builder=None, analyzer=None):
-        """Sets the sequence of subroutines (processors) that PyVesTo will execute in the morphometry pipeline.
+        """Sets the sequence of subroutines (processors) that PyVaNe will execute in the morphometry pipeline.
         Each subroutine must inherit BaseProcessor and override the apply() method. Besides, it creates
         all folders needed to save the data from the processors.
         
@@ -377,7 +377,7 @@ class BasePipeline:
 class BaseProcessor:
 
     def __init__(self):
-        """SuperClass for defining a PyVesTo subroutine, called processsor."""
+        """SuperClass for defining a PyVaNe subroutine, called processsor."""
         pass
 
     def __call__(self, img, file=None):

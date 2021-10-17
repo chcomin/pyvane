@@ -2,11 +2,11 @@
 
 ![Example](docs/readme_imgs/video.gif)
 
-**Py**thon Blood **Ves**sel **To**pology Analysis (PyVesTo) is a framework for analysing blood vessel digital images. This includes the segmentation, representation and characterization of blood vessels. The framework identifies 2D and 3D vascular systems and represent them using graphs. The graphs describe the **topology** of the blood vessels, that is, bifurcations and terminations are represented as nodes and two nodes are connected if there is a blood vessel segment between them.
+**Py**thon Blood **Ves**sel **To**pology Analysis (PyVaNe) is a framework for analysing blood vessel digital images. This includes the segmentation, representation and characterization of blood vessels. The framework identifies 2D and 3D vascular systems and represent them using graphs. The graphs describe the **topology** of the blood vessels, that is, bifurcations and terminations are represented as nodes and two nodes are connected if there is a blood vessel segment between them.
 
 Functions are provided for measuring blood vessel density, number of bifurcation points and tortuosity, but other metrics can be implemented. The created graphs are objects from the [Networkx](https://networkx.org/) libray.
 
-PyVesTo has been used in the following publications:
+PyVaNe has been used in the following publications:
 
 * McDonald, Matthew W., Matthew S. Jeffers, Lama Issa, Anthony Carter, Allyson Ripley, Lydia M. Kuhl, Cameron Morse et al. "An Exercise Mimetic Approach to Reduce Poststroke Deconditioning and Enhance Stroke Recovery." **Neurorehabilitation and Neural Repair** 35, no. 6 (2021): 471-485.
 * Ouellette, Julie, Xavier Toussay, Cesar H. Comin, Luciano da F. Costa, Mirabelle Ho, María Lacalle-Aurioles, Moises Freitas-Andrade et al. "Vascular contributions to 16p11. 2 deletion autism syndrome modeled in mice." **Nature Neuroscience** 23, no. 9 (2020): 1090-1101.
@@ -23,13 +23,13 @@ The library works for 2D and 3D blood vessel images but the focus of the library
 
 ### Segmentation
 
-File [segmentation.py](pyvesto/segmentation.py) contains the segmentation routines, aimed at classifying pixels into two categories: blood vessel or background. The image below is a sum projection of a 3D binary image.
+File [segmentation.py](pyvane/segmentation.py) contains the segmentation routines, aimed at classifying pixels into two categories: blood vessel or background. The image below is a sum projection of a 3D binary image.
 
 <img src="docs/readme_imgs/binary.png" width="600" />
 
 ### Medial Lines
 
-File [skeleton.py](pyvesto/skeleton.py) contains a skeletonization function implemented in C and interfaced using ctypes for calculating the medial lines of the blood vessels. This function was compiled for Linux.
+File [skeleton.py](pyvane/skeleton.py) contains a skeletonization function implemented in C and interfaced using ctypes for calculating the medial lines of the blood vessels. This function was compiled for Linux.
 
 <img src="docs/readme_imgs/skeleton.png" width="600" />
 
@@ -41,13 +41,13 @@ Having the binary image and the medial lines, a model of the blood vessels surfa
 
 ### Graph Generation and Adjustment
 
-Files inside the [graph](pyvesto/graph.py) folder are responsible for creating the graph and removing some artifacts such as small branches generated from the skeleton calculation.
+Files inside the [graph](pyvane/graph.py) folder are responsible for creating the graph and removing some artifacts such as small branches generated from the skeleton calculation.
 
 <img src="docs/readme_imgs/graph.png" width="600" />
 
 ### Measurements
 
-Functions inside [measure.py](pyvesto/measure.py) implement some basic blood vessel measurmeents.
+Functions inside [measure.py](pyvane/measure.py) implement some basic blood vessel measurmeents.
 
 ### Whole Pipeline
 

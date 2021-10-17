@@ -584,11 +584,11 @@ def _relative_to(ref_path, other_path):
 if __name__=='__main__':
 
     # run some tests
-    p = Path('E:/Dropbox/ufscar/pyvesto/pyvesto/img_io.py')
+    p = Path('E:/Dropbox/ufscar/pyvane/pyvane/img_io.py')
     out_dir1 = Path('E:/Dropbox/ufscar/codes/img.py')
-    out_dir2 = Path('E:/Dropbox/ufscar/pyvesto/pyvesto/codes')
+    out_dir2 = Path('E:/Dropbox/ufscar/pyvane/pyvane/codes')
     out_dir3 = Path('E:/codes')
     out_dir4 = Path('C:/codes')
-    out_dir5 = Path('E:/Dropbox/ufscar/pyvesto/pyvesto')
+    out_dir5 = Path('E:/Dropbox/ufscar/pyvane/pyvane')
 
     print(_relative_to(p, out_dir1))
