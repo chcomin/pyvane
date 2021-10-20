@@ -1,3 +1,5 @@
+"""Pipeline used for defining the segmentation, skeletonization, graph creation and analysis of a vascular image dataset."""
+
 from pathlib import Path
 import copy
 import os
