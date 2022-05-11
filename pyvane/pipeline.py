@@ -606,7 +606,7 @@ class DefaultAnalyzer(BaseProcessor):
         return measurements
 
     def load_roi(self, file):
-        """Not implemented yet."""
+        """Overload this function for loading a ROI for analysis."""
 
         return None
         
@@ -715,7 +715,7 @@ class AuxiliaryPipeline(BasePipeline):
 
         tifffile.imsave(self.output_path/'verification.tif', verification_stack)
 
-def read_and_adjust_img(file, channel=None, stretch_range=True, roi=None):
+def read_and_adjust_img(file, channel=None, stretch_range=True, pix_size=None, roi=None):
     """Reads image from disk, transform its data to float, apply the linear transformation
     [min, max]->[0, 255] and interpolate the image to make it isotropic.
     
@@ -725,6 +725,13 @@ def read_and_adjust_img(file, channel=None, stretch_range=True, roi=None):
         Location of the image.
     channel: int
         Channel to be processed. If None, all channels will be considered.
+    stretch_range: bool
+        If True, the intensities of the image are remapped to the [0,255] range. Warning!
+        This changes the overall image brightness.
+    pix_size: list
+        Physical size of the pixels. If not provided, the function tries to infer the
+        pixel size using metadata information from the image. If it cannot find the pixel size,
+        a value of 1 is used for all dimensions.
 
     Returns
     ----------
@@ -736,6 +743,8 @@ def read_and_adjust_img(file, channel=None, stretch_range=True, roi=None):
     if roi is not None:
         img.data = img.data[roi]
         img.shape = img.data.shape
+    if pix_size is not None:
+        img.pix_size = np.array(pix_size)
     img_dtype = img.data.dtype
     if img_dtype!=np.uint16 and img_dtype!=np.uint8:
         raise ValueError(f'Pixel data type is {img_dtype}, but should be either uint8 or uint16.')

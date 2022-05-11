@@ -218,31 +218,39 @@ def find_pix_size_tiff(tiff_data):
     try:
         pix_size_z = 1.
         num_char = 21
-        imagej_tags = tiff_data.pages[0].imagej_tags
-        if 'spacing' in imagej_tags:
-            pix_size_z = imagej_tags['spacing']
-        if ('info' in imagej_tags):
-            img_info=data.pages[0].imagej_tags['info']
-            k1 = img_info.find('HeightConvertValue')
-            if k1!=-1:
-                aux = img_info[k1+num_char:k1+num_char+10]
-                k2 = aux.find('\n')
-                pix_size_x = float(aux[:k2])
-                k1 = img_info.find('WidthConvertValue')
-                aux = img_info[k1+num_char-1:k1+num_char+10-1]
-                k2 = aux.find('\n')
-                pix_size_y = float(aux[:k2])
-            else:
-                pix_size_x, pix_size_y = -1, -1
+        try:
+            imagej_tags = tiff_data.pages[0].imagej_tags
+            if 'spacing' in imagej_tags:
+                pix_size_z = imagej_tags['spacing']
+            if ('info' in imagej_tags):
+                img_info = tiff_data.pages[0].imagej_tags['info']
+                k1 = img_info.find('HeightConvertValue')
+                if k1!=-1:
+                    aux = img_info[k1+num_char:k1+num_char+10]
+                    k2 = aux.find('\n')
+                    pix_size_x = float(aux[:k2])
+                    k1 = img_info.find('WidthConvertValue')
+                    aux = img_info[k1+num_char-1:k1+num_char+10-1]
+                    k2 = aux.find('\n')
+                    pix_size_y = float(aux[:k2])
+                else:
+                    pix_size_x, pix_size_y = -1, -1
 
-        else:
-            p = data.pages[0]
-            v = p.tags['x_resolution'].value
-            pix_size_x = v[1]/float(v[0])
-            v = p.tags['y_resolution'].value
-            pix_size_y = v[1]/float(v[0])
+        except  Exception:
+            p = tiff_data.pages[0]
+            if 'x_resolution' in p.tags:
+                tag_x = p.tags['x_resolution'].value
+                tag_y = p.tags['y_resolution'].value
+            elif 'XResolution' in p.tags:
+                tag_x = p.tags['XResolution'].value
+                tag_y = p.tags['YResolution'].value
+            else:
+                raise ValueError
+                
+            pix_size_x = tag_x[1]/float(tag_x[0])
+            pix_size_y = tag_y[1]/float(tag_y[0])
     except  Exception:
-        pix_size_z=pix_size_x=pix_size_y=1.
+        pix_size_z = pix_size_x = pix_size_y = 1.
 
     return (pix_size_z, pix_size_x, pix_size_y)
 
