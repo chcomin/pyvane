@@ -206,7 +206,7 @@ def add_edges_to_graph(graph, new_edges_pos):
 
             graph.add_edge(node1, node2, path=new_edge_pos[1:-1])
             
-def break_edges_crossing_window(graph, win_center, win_size):
+def graph_in_window(graph, win_center, win_size):
     '''For each edge crossing the window, remove the portion of the edge outside of the window, create 
     a node at the crossing point (window border) and connect the newly created node with the node inside 
     the window that is connected to the edge. 
