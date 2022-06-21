@@ -184,7 +184,7 @@ def add_edges_to_graph(graph, new_edges_pos):
     
     curr_node = len(graph)
     
-    nodes_pos_dict = {}
+    nodes_pos_dict = {pos:node for node, pos in graph.nodes(data='center')}
     for new_edge_pos in new_edges_pos:
         if len(new_edge_pos)>2:   # !! Edges smaller than 2 pixels are removed from the image !!
             node1_pos = new_edge_pos[0]
