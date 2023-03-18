@@ -9,7 +9,7 @@ import networkx as nx
 try:
     import igraph
 except ImportError:
-    raise ImportError('igraph not found, will not be able to convert graphs to igraph format.')
+    print('igraph not found, will not be able to convert graphs to igraph format.')
 
 class PriorityQueue:
     """Priority queue that allows changes to, or removal of, elements of a pending task.
