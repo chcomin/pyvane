@@ -451,7 +451,10 @@ class DefaultSegmenter(BaseProcessor):
         image.Image
             Segmented vessels of `img`.
         """
-        filename = file.stem
+        if file is None:
+            filename = None
+        else:
+            filename = file.stem
         threshold = self.threshold[filename]
 
         return segmentation.vessel_segmentation(img, threshold, sigma=self.sigma, radius=self.radius, comp_size=self.comp_size, 
