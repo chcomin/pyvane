@@ -51,14 +51,18 @@ Functions inside [measure.py](pyvane/measure.py) implement some basic blood vess
 
 ### Whole Pipeline
 
-The notebook [blood_vessel_pipeline.ipynb](notebooks/blood_vessel_pipeline.ipynb) contains an example pipeline for applying all the functionalities. 
+The notebook [default_pipeline.ipynb](tutorials/default_pipeline.ipynb) contains an example pipeline for applying all the functionalities. 
 
 ### Dependencies (version)
-* Python (3.7.4)
-* scipy (1.4.1)
-* numpy (1.19.2)
-* networkx (2.4)
-* matplotlib (3.3.4)
-* igraph (0.7.1) - optional
+* Python (3.12.3)
+* scipy (1.13.0)
+* numpy (1.26.4)
+* networkx (3.3)
+* matplotlib (3.8.4)
+* natsort (8.4.0)
+* oiffile (2023.8.30)
+* czifile (2019.7.2)
+* scikit-image (0.22.0)
+* python-igraph (0.11.4) - optional
 
 **Warning, the skeletonization functions only work on Linux.**
