@@ -109,7 +109,7 @@ class Image:
         ----------
         curr_max : Union[int, float]
             The maximum value of the current data type. For instance, it is 255 for uint8 and usually
-            1. for np.float.
+            1. for float.
         new_max : Union[int, float]
             The maximum value of the new data type.
         """
@@ -150,9 +150,9 @@ class Image:
         self.data = self.data.astype(np.uint8)
 
     def to_float(self):
-        """Convert data type to np.float"""
+        """Convert data type to np.float64"""
 
-        self.data = self.data.astype(np.float)
+        self.data = self.data.astype(float)
 
     def unique(self):
         """Return unique values in the image.

@@ -27,7 +27,7 @@ def parametric_line_fit(path):
 
     fitted_coord = []
     for coord in path.T:
-        slope, intercept = scipy.polyfit(s, coord, 1)
+        slope, intercept = np.polyfit(s, coord, 1)
         fitted_coord.append(slope*s + intercept)
 
     return fitted_coord

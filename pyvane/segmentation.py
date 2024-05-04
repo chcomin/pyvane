@@ -43,8 +43,8 @@ def vessel_segmentation(img, threshold, sigma=None, radius=40, comp_size=500, ho
 
     img_data = img.data
 
-    if img_data.dtype!=np.float:
-        img_data = img_data.astype(np.float)
+    if img_data.dtype!=float:
+        img_data = img_data.astype(float)
 
     pix_size = np.array(img.pix_size)
     img_data_diffused = ndi.gaussian_filter(img_data, sigma=sigma/pix_size)
@@ -60,8 +60,8 @@ def _vessel_segmentation_2d(img_data, threshold, radius=40, comp_size=500, hole_
     """Blood vessel segmentation of a 2D image. See function `vessel_segmentation` for details.
     """
 
-    if img_data.dtype!=np.float:
-        img_data = img_data.astype(np.float)
+    if img_data.dtype!=float:
+        img_data = img_data.astype(float)
 
     img_bin = adaptive_thresholding(img_data, threshold, radius)
     img_no_small_comp = util.remove_small_comp(img_bin, comp_size)
@@ -77,8 +77,8 @@ def _vessel_segmentation_3d(img_data, threshold, radius=40, comp_size=500):
     """Blood vessel segmentation of a 3D image. See function `vessel_segmentation` for details.
     """
 
-    if img_data.dtype!=np.float:
-        img_data = img_data.astype(np.float)
+    if img_data.dtype!=float:
+        img_data = img_data.astype(float)
 
     img_bin = np.zeros_like(img_data, dtype=np.uint8)
     for idx in range(img_data.shape[0]):
@@ -114,8 +114,8 @@ def adaptive_thresholding(img_data, threshold, radius):
         The resulting binary image.
     """
 
-    if img_data.dtype!=np.float:
-        img_data = img_data.astype(np.float)
+    if img_data.dtype!=float:
+        img_data = img_data.astype(float)
 
     img_blurred = ndi.gaussian_filter(img_data, sigma=radius/2.)
     img_corr = img_data - img_blurred
