@@ -1,10 +1,27 @@
 """Utility functions for reading 3D images."""
 
 from xml.etree import cElementTree as etree
-import oiffile as oif
-import tifffile
 import numpy as np
-import czifile
+
+# Try to import the required libraries for reading images.
+try: 
+    import tifffile
+    _tifffile_available = True
+except ImportError:
+    _tifffile_available = False
+
+try: 
+    import oiffile
+    _oiffile_available = True
+except ImportError:
+    _oiffile_available = False
+
+try:
+    import czifile
+    _czifile_available = True
+except ImportError:
+    _czifile_available = False
+
 from .image import Image
 
 def read_img(path, channel=None, read_pix_size=True):
@@ -90,6 +107,9 @@ def read_tiff(path, return_pix_size=False):
         The physical size of each pixel.
     """
 
+    if not _tifffile_available:
+        raise ImportError("The tifffile package is required for reading tiff files but it is not available.")
+
     tiff_data = tifffile.TiffFile(path)
     img_data = tiff_data.asarray()
 
@@ -120,18 +140,21 @@ def read_oib(path, return_pix_size=False):
         The physical size of each pixel.
     """
 
-    oib_data = oif.OifFile(path)
-    img_data = oib_data.asarray()
+    if not _oiffile_available:
+        raise ImportError("The oiffile package is required for reading oif files but it is not available.")
+
+    oif_data = oiffile.OifFile(path)
+    img_data = oif_data.asarray()
 
     if not return_pix_size:
         return img_data
 
-    img_info = data.mainfile['Reference Image Parameter']
-    piz_size_z = 1.
-    piz_size_x = img_info['HeightConvertValue']
-    piz_size_y = img_info['WidthConvertValue']
+    img_info = oif_data.mainfile['Reference Image Parameter']
+    pix_size_z = 1.
+    pix_size_x = img_info['HeightConvertValue']
+    pix_size_y = img_info['WidthConvertValue']
 
-    pix_size = (piz_size_z, piz_size_x, piz_size_y)
+    pix_size = (pix_size_z, pix_size_x, pix_size_y)
     print('Warning, assuming image depth equal to 1')
 
     return img_data, pix_size
@@ -156,6 +179,9 @@ def read_lsm(path, return_pix_size=False):
         The physical size of each pixel.
     """
 
+    if not _tifffile_available:
+        raise ImportError("The tifffile package is required for reading tiff files but it is not available.")
+
     lsm_data = tifffile.TIFFfile(path)
     img_data = lsm_data.asarray(series=0)
 
@@ -171,7 +197,7 @@ def read_lsm(path, return_pix_size=False):
     return img_data, pix_size
 
 def read_czi(path, return_pix_size=False):
-    """Read tif image.
+    """Read czi image.
 
     Parameters
     ----------
@@ -190,6 +216,9 @@ def read_czi(path, return_pix_size=False):
         The physical size of each pixel.
     """
 
+    if not _czifile_available:
+        raise ImportError("The czifile package is required for reading czi files but it is not available.")
+
     czi_data = czifile.CziFile(path)
     img_data = czi_data.asarray()
 
@@ -199,7 +228,6 @@ def read_czi(path, return_pix_size=False):
     pix_size = find_pix_size_czi(czi_data)
 
     return img_data, pix_size
-
 
 def find_pix_size_tiff(tiff_data):
     """Find pixel size in the metadata of a tiff file.

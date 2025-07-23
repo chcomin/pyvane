@@ -8,8 +8,9 @@ import networkx as nx
 
 try:
     import igraph
+    _igraph_available = True
 except ImportError:
-    print('igraph not found, will not be able to convert graphs to igraph format.')
+    _igraph_available = False
 
 class PriorityQueue:
     """Priority queue that allows changes to, or removal of, elements of a pending task.
@@ -258,43 +259,6 @@ def erase_line(num_chars=80):
 
     print('\r'+' '*num_chars, end='\r')
 
-# Functions related to igraph
-def to_igraph(ips, edges):
-    """Convert an interest point list and an edge list to igraph.
-
-    Parameters
-    ---------
-    ips : list of InterestPoint
-        Bifurcations and terminations identified in an image.
-    edges : list of tuple
-        Edge list containing blood vessel segments. Each element is a tuple (node1, node2, path), where
-        path contains the pixels of the segment.
-
-    Returns
-    -------
-    graph : igraph.Graph
-        The created graph.
-
-    """
-
-    ip_dict = {'pixels':[], 'center':[], 'type':[], 'ndim':[], 'branches':[]}
-    for ip in ips:
-        ip_dict['pixels'].append(ip.pixels)
-        ip_dict['center'].append(ip.center)
-        ip_dict['type'].append(ip.type)
-        ip_dict['ndim'].append(ip.ndim)
-        ip_dict['branches'].append(ip.branches)
-
-    edge_dict = {'path':[]}
-    edge_list = []
-    for edge in edges:
-        edge_list.append((edge[0], edge[1]))
-        edge_dict['path'].append(edge[2])
-
-    graph = igraph.Graph(n=len(ips), edges=edge_list, vertex_attrs=ip_dict, edge_attrs=edge_dict)
-
-    return graph
-
 def nx_to_igraph(graph):
     """Convert a networkx graph to igraph. The graph can contain node and edge attributes as well as
     graph attributes.
@@ -309,6 +273,9 @@ def nx_to_igraph(graph):
     ig_graph : igraph.Graph
         The converted graph as an igraph.Graph object.
     """
+
+    if not _igraph_available:
+        raise ImportError("The igraph package is required for converting to igraph format but it is not available.")
 
     node_attrs_keys = set()
     for node, attrs in graph.nodes(data=True):
@@ -472,13 +439,6 @@ def match_graphs_igraph(ips, ig):
 if __name__=='__main__':
 
     # Run some tests
-
-    ig_graph = Graph(n=4, edges=[(0,0),(0,1),(0,1),(0,2),(1,2),(0,3)], graph_attrs={'file':'graph.gml'},
-                     vertex_attrs={'color':['red', 'green', 'blue', 'yellow']}, edge_attrs={'length':[0, 2, 2.5, 5, 7, 10]})
-
-    graph = igraph_to_nx(ig_graph)
-    ig_graph2 = nx_to_igraph(graph)
-
     nx_graph = nx.Graph()
     nx_graph.add_nodes_from([(0, {'color':'blue'}), (1, {'color':'red'}), (2, {'color':'green'})])
     nx_graph.add_edges_from([(0, 1, {'relation':'enemy'}), (0, 2, {'relation':'enemy'}), (1, 2, {'relation':'friend'})])

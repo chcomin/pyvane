@@ -11,7 +11,12 @@ from contextlib import nullcontext
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.ndimage as ndi
-import tifffile
+
+try:
+    import tifffile
+    _tifffile_available = True
+except ImportError:
+    _tifffile_available = False
 
 from . import file_util, img_io, segmentation, skeleton, util, measure
 from .graph.creation import create_graph
@@ -690,6 +695,9 @@ class AuxiliaryPipeline(BasePipeline):
     def verify_results(self):
         """Creates a stack from each `self.files` image and its generated graph. The stack is saved in
         `self.output_path/verification.tif`."""
+
+        if not _tifffile_available:
+            raise ImportError('The tifffile package is required for writing image stacks but it is not available.')
 
         files = self.files
         num_files = 2*len(files)
