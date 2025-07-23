@@ -1,7 +1,0 @@
-segmentation module
-===================
-
-.. automodule:: segmentation
-   :members:
-   :undoc-members:
-   :show-inheritance:
