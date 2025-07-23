@@ -121,9 +121,9 @@ def img_volume(pix_size, img_shape, img_roi=None, scale_factor=1):
     img_shape = np.array(img_shape)
 
     if img_roi is None:
-        volume = np.product(img_shape*pix_size*scale_factor)
+        volume = np.prod(img_shape*pix_size*scale_factor)
     else:
-        volume = np.sum(img_roi)*np.product(pix_size*scale_factor)
+        volume = np.sum(img_roi)*np.prod(pix_size*scale_factor)
 
     return volume
 
