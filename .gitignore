@@ -1,7 +1,3 @@
-__pycache__/
-.ipynb_checkpoints/
-.vscode/
-/data/*/
-/tests/
-/old_dev_notebooks/
-notebooks/
+_*
+.*
+!_*.py

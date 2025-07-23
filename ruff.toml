@@ -1,0 +1,13 @@
+target-version = "py312"
+line-length = 100
+
+[lint]
+select = ["E", "F", "UP", "D", "B", "SIM", "I", "C4", "Q", "PL", "NPY", "FURB", "RUF"]
+ignore = ["SIM117", "SIM102", "SIM108", "B905", "PLR", "PLC0414", "PLW2901", "NPY002", "RUF100",
+          "D102", "D104", "D105", "D202", "D205", "D210", "D400", "D401", "D403"]
+
+[lint.pydocstyle]
+convention = "numpy"
+
+[lint.per-file-ignores]
+"*.ipynb" = ["D"]
