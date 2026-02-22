@@ -444,6 +444,8 @@ def map_foreground_to_graph(graph, img_bin, edt_bg, trash_paths=None, compactnes
     labeled_volume = watershed(
         topography, marker_volume, mask=img_bin, connectivity=3, compactness=compactness)
     
+    labeled_volume[labeled_volume == TRASH_ID] = 0
+
     edge_id_map = {edge: label_id for label_id, edge in edge_mapping.items()}
 
     mappings = {
@@ -457,7 +459,7 @@ def map_foreground_to_graph(graph, img_bin, edt_bg, trash_paths=None, compactnes
 
 def create_graph(
     skel_img: np.ndarray, 
-    img_bin: np.ndarray, 
+    bin_img: np.ndarray, 
     length_threshold: float = 5.0,
     keep_rings: bool = True, 
     full_output: bool = False
@@ -483,7 +485,7 @@ def create_graph(
 
     Args:
         skel_img: 2D or 3D binary array representing the skeletonized image.
-        img_bin: 2D or 3D binary array representing the original foreground mask.
+        bin_img: 2D or 3D binary array representing the original foreground mask.
         length_threshold: Minimum length for edges, in voxels, to be retained during refinement.
         keep_rings: Whether to keep pure rings (isolated loops) in the graph.
         full_output: If True, also returns the Euclidean distances and the list of removed paths 
@@ -505,7 +507,7 @@ def create_graph(
     # Refine the graph topology
     simple_graph, edt_bg, trash_paths = refine_graph(
         cond_graph, 
-        img_bin,
+        bin_img,
         bulge_len_threshold = length_threshold,
         bulge_size_threshold = 0.0,
         bulge_ratio_threshold = 0.0,
@@ -535,7 +537,7 @@ def create_graph(
 
 def create_graph_with_mapping(
     skel_img: np.ndarray, 
-    img_bin: np.ndarray, 
+    bin_img: np.ndarray, 
     length_threshold: float = 5.0,
     keep_rings: bool = True, 
     ):
@@ -547,7 +549,7 @@ def create_graph_with_mapping(
 
     Args:
         skel_img: 2D or 3D binary array representing the skeletonized image.
-        img_bin: 2D or 3D binary array representing the original foreground mask.
+        bin_img: 2D or 3D binary array representing the original foreground mask.
         length_threshold: Minimum length for edges to be retained during refinement.
         keep_rings: Whether to keep pure rings (isolated loops) in the graph.
 
@@ -567,14 +569,14 @@ def create_graph_with_mapping(
 
     simple_graph, edt_bg, trash_paths = create_graph(
         skel_img, 
-        img_bin, 
+        bin_img,
         length_threshold = length_threshold,
         keep_rings = keep_rings, 
         full_output = True
     )
 
-    labeled_volume, id_node_map, id_edge_map = map_foreground_to_graph(
-        simple_graph, img_bin, edt_bg, trash_paths=trash_paths, compactness=0)
+    labeled_volume, mappings = map_foreground_to_graph(
+        simple_graph, bin_img, edt_bg, trash_paths=trash_paths, compactness=0)
     
 
     return simple_graph, labeled_volume, mappings

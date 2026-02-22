@@ -479,13 +479,13 @@ def collapse_internal_bridges(graph, edt_bg, collapse_length_ratio_threshold=0.2
 
     return graph_changed
 
-def filter_components(graph, comp_size_threshold=0, comp_length_threshold=0):
+def filter_components(graph, comp_size_threshold=0, comp_length_threshold=0.0):
     """Removes connected components that are smaller than the specified size or length thresholds.
     Size is defined as the number of nodes in the component. Length is defined as the sum
     of the lengths of all edges in the component. Thresholds of 0 mean no filtering.
     """
 
-    if comp_size_threshold == 0 and comp_length_threshold == 0:
+    if comp_size_threshold == 0 and comp_length_threshold == 0.0:
         return
 
     # networkx connected_components yields sets of nodes
@@ -514,7 +514,7 @@ def filter_components(graph, comp_size_threshold=0, comp_length_threshold=0):
 
 def refine_graph(
         condensed_graph,
-        img_bin,
+        bin_img,
         bulge_len_threshold = 4.0,
         bulge_size_threshold = 0.0,
         bulge_ratio_threshold = 0.0,
@@ -555,7 +555,7 @@ def refine_graph(
 
     Args:
         condensed_graph: The initial graph to be refined.
-        img_bin: The original binary image, used for EDT calculations.
+        bin_img: The original binary image, used for EDT calculations.
         bulge_len_threshold: Min allowed bulge length for leaf branches.
         bulge_size_threshold: Min allowed bulge size for leaf branches.
         bulge_ratio_threshold:  Min allowed bulge ratio for leaf branches.
@@ -587,7 +587,7 @@ def refine_graph(
     """
     graph = condensed_graph.copy()
 
-    edt_bg = distance_transform_edt(img_bin)
+    edt_bg = distance_transform_edt(bin_img)
     # Keep track of pixels from paths that are removed.
     global_trash_paths = []
 

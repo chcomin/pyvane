@@ -43,12 +43,21 @@ def vessel_segmentation(img, threshold, sigma=None, radius=40, comp_size=500, ho
         sigma = [1.]*ndim
     sigma = np.array(sigma)
 
-    img_data = img.data
+    return_array = False
+    if isinstance(img, np.ndarray):
+        img_data = img
+        pix_size = (1.,)*img.ndim
+        img_path = None
+        return_array = True
+    else:
+        img_data = img.data
+        pix_size = img.pix_size
+        img_path = img.path
 
     if img_data.dtype!=float:
         img_data = img_data.astype(float)
 
-    pix_size = np.array(img.pix_size)
+    pix_size = np.array(pix_size)
     img_data_diffused = ndi.gaussian_filter(img_data, sigma=sigma/pix_size)
 
     if ndim==2:
@@ -56,7 +65,10 @@ def vessel_segmentation(img, threshold, sigma=None, radius=40, comp_size=500, ho
     elif ndim==3:
         img_final = _vessel_segmentation_3d(img_data_diffused, threshold, radius, comp_size)
 
-    return Image(img_final.astype(np.uint8), img.path, pix_size=img.pix_size)
+    if return_array:
+        return img_final
+
+    return Image(img_final.astype(np.uint8), img_path, pix_size=pix_size)
 
 def _vessel_segmentation_2d(img_data, threshold, radius=40, comp_size=500, hole_size=None):
     """Blood vessel segmentation of a 2D image. See function `vessel_segmentation` for details.
