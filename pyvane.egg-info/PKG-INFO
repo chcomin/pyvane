@@ -1,3 +1,11 @@
+Metadata-Version: 2.4
+Name: pyvane
+Version: 1.0
+Summary: Segmentation and analysis of vascular sctructures.
+Description-Content-Type: text/markdown
+License-File: LICENSE.txt
+Dynamic: license-file
+
 # Python Vascular Network Analysis
 
 ![Example](assets/video.gif)
@@ -5,12 +13,6 @@
 **Py**thon  **Va**scular **Ne**twork Analysis (PyVaNe) is a framework for analysing blood vessel digital images. This includes the segmentation, representation and characterization of blood vessels. The framework identifies 2D and 3D vascular systems and represent them using graphs. The graphs describe the **topology** of the blood vessels, that is, bifurcations and terminations are represented as nodes and two nodes are connected if there is a blood vessel segment between them.
 
 Functions are provided for measuring blood vessel density, number of bifurcation points and tortuosity, but other metrics can be implemented. The created graphs are objects from the [Networkx](https://networkx.org/) libray.
-
-🔴 **PyVaNe is undergoing significant changes! A new graph creation methodology has been implemented and neural network segmentation will be added soon. In the meantime, some functionalities might not work as expected.**
-
-**The pipeline functionality has been temporarily removed. Please use the individual functions instead.**
-
-
 
 PyVaNe has been used in the following publications:
 
@@ -29,13 +31,13 @@ The library works for 2D and 3D blood vessel images but the focus of the library
 
 ### Segmentation
 
-Folder [segmentation](pyvane/segmentation) contains the segmentation routines, aimed at classifying pixels into two categories: blood vessel or background. The image below is a sum projection of a 3D binary image.
+File [segmentation.py](pyvane/segmentation.py) contains the segmentation routines, aimed at classifying pixels into two categories: blood vessel or background. The image below is a sum projection of a 3D binary image.
 
 <img src="assets/binary.png" width="600" />
 
 ### Medial Lines
 
-Folder [skeletonization](pyvane/skeletonization) contains a skeletonization function implemented in C and interfaced using ctypes for calculating the medial lines of the blood vessels. This function was compiled for Linux.
+File [skeleton.py](pyvane/skeleton.py) contains a skeletonization function implemented in C and interfaced using ctypes for calculating the medial lines of the blood vessels. This function was compiled for Linux.
 
 <img src="assets/skeleton.png" width="600" />
 
@@ -47,14 +49,17 @@ Having the binary image and the medial lines, a model of the blood vessels surfa
 
 ### Graph Generation and Adjustment
 
-Folder [graph](pyvane/graph) contains a robust procedure for creating the graph and removing some artifacts such as small branches generated from the skeleton.
+Files inside the [graph](pyvane/graph.py) folder are responsible for creating the graph and removing some artifacts such as small branches generated from the skeleton calculation.
 
 <img src="assets/graph.png" width="600" />
 
 ### Measurements
 
-Functions inside [metrics](pyvane/metrics) implement some basic blood vessel measurmeents.
+Functions inside [measure.py](pyvane/measure.py) implement some basic blood vessel measurmeents.
 
+### Whole Pipeline
+
+The notebook [default_pipeline.ipynb](tutorials/default_pipeline.ipynb) contains an example pipeline for applying all the functionalities. 
 
 ### Dependencies (version)
 * Python (3.12.3)
