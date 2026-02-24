@@ -572,7 +572,7 @@ def refine_graph(
         bridge_length_threshold: H-bridge removal. Besides being thin, the bridge must also be 
             smaller than this threshold to be removed.
         collapse_length_ratio_threshold: X-cross collapse. If the edge length divided by the
-            sum of the radii of the connected segments is smaller than this threshold, the edge is 
+            sum of the radii of the connected nodes is smaller than this threshold, the edge is 
             collapsed into a single node. Note that this transformation might have unintended 
             consequences on the topology, so use with caution.
         comp_size_threshold: Min number of nodes for a connected component to be kept.

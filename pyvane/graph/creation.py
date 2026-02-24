@@ -165,6 +165,7 @@ def graph_from_skeleton(skel_img, keep_rings = True):
     Handles both 2D and 3D arrays automatically.
     """
 
+    img_shape = skel_img.shape
     is_2d = skel_img.ndim == 2
     if is_2d:
         skel_img = skel_img[np.newaxis, ...] # Promote to 3D
@@ -202,7 +203,10 @@ def graph_from_skeleton(skel_img, keep_rings = True):
     labels_P, _ = label(mask_P, structure=struct_26) # type: ignore
     
     graph = nx.MultiGraph()
-    graph.graph["is_2d"] = is_2d
+    graph.graph = {
+        "img_shape": img_shape,
+        "is_2d": is_2d,
+    }
     
     # Add Nodes
     node_coords_dict = group_coordinates_by_label(labels_V)
@@ -362,19 +366,69 @@ def remove_clusters(full_graph, remove_degree_two = True, keep_rings = True):
         
     return graph
 
-def map_foreground_to_graph(graph, img_bin, edt_bg, trash_paths=None, compactness=0):
-    """Partitions the foreground image into distinct Junction and Edge volumes.
-    Uses internal path segments as structural markers for junctions to prevent edge bleeding.
+def assign_node_radii_and_outer_props(graph, edt_bg):
+    """
+    Calculates and stores the geometric radius for each node and the 
+    exact Euclidean trim indices for each edge.
+    """
 
-    See `create_graph_with_mapping` for the main function that calls this and returns the mappings.
+    for n in graph.nodes():
+        center = tuple(graph.nodes[n]['center'])
+        graph.nodes[n]['radius'] = float(edt_bg[center])
+        
+    for u, v, _, data in graph.edges(keys=True, data=True):
+        path = data['path']
+        path_len = len(path)
+        
+        if path_len == 0:
+            data['trim_amount'] = (0, 0)
+            data["outer_length"] = 0.0
+            continue
+            
+        # Enforce min -> max ordering to perfectly align with the path array
+        node_start, node_end = (u, v) if u < v else (v, u)
+        
+        # Determine the effective trimming radius (0.0 if not a junction)
+        r_start = graph.nodes[node_start]['radius'] if graph.degree(node_start) > 2 else 0.0
+        r_end = graph.nodes[node_end]['radius'] if graph.degree(node_end) > 2 else 0.0
+        
+        center_start = np.array(graph.nodes[node_start]['center'], dtype=np.int32)
+        center_end = np.array(graph.nodes[node_end]['center'], dtype=np.int32)
+        
+        trim_start, trim_end = get_euclidean_trim_indices(
+            path, center_start, center_end, r_start, r_end
+        )
+        
+        # Store the indices on the edge dictionary
+        data['trim_amount'] = (int(trim_start), int(trim_end))
+        data["outer_length"] = max(0.0, float(path_len - r_start - r_end))
+
+def map_foreground_to_graph(
+        graph, 
+        img_bin, 
+        edt_bg, 
+        edges_only = True, 
+        compactness=0.0,
+        trash_paths=None, 
+        ):
+    """
+    Computes the Geodesic Voronoi partition of the vessel volume and maps 
+    every region strictly to its biological source (Node or Edge Pixel).
+    
+    Returns:
+        labeled_voronoi: 3D int32 volume where every voxel has a unique partition ID.
+        id_node_map: Dict mapping [label_id -> node_id]. Defines junction volumes.
+        id_edge_map: Dict mapping [label_id -> ((u, v, key), path_index)]. 
+                     Defines local cross-sectional slices of exposed vessels.
     """
     marker_volume = np.zeros_like(img_bin, dtype=np.int32)
-    node_mapping = {}
-    edge_mapping = {}
     
-    TRASH_ID = 999999 
+    id_node_map = {}
+    id_edge_map = {}
     
-    # Burn Trash Markers First
+    TRASH_ID = 999999
+    
+    # Burn Trash Markers
     if trash_paths:
         for t_path in trash_paths:
             if len(t_path) > 0:
@@ -382,61 +436,63 @@ def map_foreground_to_graph(graph, img_bin, edt_bg, trash_paths=None, compactnes
                 
     current_id = 1
     
-    # Pre-assign IDs to Junction Nodes (Degree > 2)
-    # We map them first so we can assign their internal paths in the next step
-    node_id_map = {} 
-    for n in graph.nodes():
-        if graph.degree(n) > 2:
-            node_id_map[n] = current_id
-            node_mapping[current_id] = n
+    # Keep a temporary reverse lookup to assign internal paths to node IDs
+    node_to_id = {}
+    
+    if not edges_only:
+        # Burn Node Markers (Junction Centers)
+        for n in graph.nodes():
+            if graph.degree(n) > 2:
+                id_node_map[current_id] = n
+                node_to_id[n] = current_id
+                
+                center = tuple(graph.nodes[n]['center'])
+                marker_volume[center] = current_id
+                current_id += 1
             
-            # Seed the exact center
-            center = tuple(graph.nodes[n]["center"])
-            marker_volume[center] = current_id 
-            current_id += 1
-            
-    # Process Edges: Burn Exposed Edges AND Junction Penetrators
+    # Process Edges (Inner Paths vs. Outer Paths)
     for u, v, key, data in graph.edges(keys=True, data=True):
-        path = data["path"]
+        path = data['path']
         path_len = len(path)
-
-        node_s, node_e = (u, v) if u < v else (v, u)
         
-        # Enforce r=0 for non-junctions (like endpoints)
-        r_s = edt_bg[tuple(graph.nodes[node_s]["center"])] if graph.degree(node_s) > 2 else 0.0
-        r_e = edt_bg[tuple(graph.nodes[node_e]["center"])] if graph.degree(node_e) > 2 else 0.0
-        
-        center_s = np.array(graph.nodes[node_s]["center"], dtype=np.int32)
-        center_e = np.array(graph.nodes[node_e]["center"], dtype=np.int32)
-        
-        trim_s, trim_e = get_euclidean_trim_indices(path, center_s, center_e, r_s, r_e)
-        
-        # Scenario A: Edge is entirely swallowed by the junctions
-        if trim_s + trim_e >= path_len:
-            if path_len > 0:
-                mid_idx = path_len // 2
-                
-                # Split the internal path between the two junctions
-                if graph.degree(u) > 2:
-                    marker_volume[tuple(path[:mid_idx].T)] = node_id_map[u]
-                if graph.degree(v) > 2:
-                    marker_volume[tuple(path[mid_idx:].T)] = node_id_map[v]
+        if path_len == 0:
+            continue
             
-        # Scenario B: Normal edge with an exposed middle section
+        # Enforce min -> max ordering to align mathematically with the path array
+        node_start, node_end = (u, v) if u < v else (v, u)
+        edge_id = (node_start, node_end, key)
+        
+        trim_start, trim_end = data['trim_amount']
+        if edges_only:
+            trim_start, trim_end = 0, 0
+
+        # Scenario A: Edge is entirely swallowed by junctions
+        if trim_start + trim_end >= path_len:
+            mid_idx = path_len // 2
+            if graph.degree(node_start) > 2:
+                marker_volume[tuple(path[:mid_idx].T)] = node_to_id[node_start]
+            if graph.degree(node_end) > 2:
+                marker_volume[tuple(path[mid_idx:].T)] = node_to_id[node_end]
+                
+        # Scenario B: Normal edge with an exposed outer path
         else:
-            # Burn the u-junction internal skeleton
-            if trim_s > 0 and graph.degree(u) > 2:
-                marker_volume[tuple(path[:trim_s].T)] = node_id_map[u]
-                
-            # Burn the v-junction internal skeleton
-            if trim_e > 0 and graph.degree(v) > 2:
-                marker_volume[tuple(path[path_len - trim_e:].T)] = node_id_map[v]
-                
-            # Burn the exposed outer edge
-            outer_path = path[trim_s : path_len - trim_e]
-            if len(outer_path) > 0:
-                marker_volume[tuple(outer_path.T)] = current_id
-                edge_mapping[current_id] = (u, v, key)
+            # Burn the inner paths using the existing Junction IDs
+            if trim_start > 0 and graph.degree(node_start) > 2:
+                marker_volume[tuple(path[:trim_start].T)] = node_to_id[node_start]
+            if trim_end > 0 and graph.degree(node_end) > 2:
+                marker_volume[tuple(path[path_len - trim_end:].T)] = node_to_id[node_end]
+            
+            # Burn the outer path: EVERY PIXEL gets a unique ID
+            # We map it to its exact index 'i' within the edge's original path array
+            for i in range(trim_start, path_len - trim_end):
+                coord = tuple(path[i].tolist())
+                marker_volume[coord] = current_id
+                id_edge_map[current_id] = {
+                    'edge': edge_id,
+                    'abs_idx': i,                 
+                    'outer_idx': i - trim_start,  
+                    'coord': coord                
+                }
                 current_id += 1
 
     # Execute Topographical Flooding
@@ -446,16 +502,10 @@ def map_foreground_to_graph(graph, img_bin, edt_bg, trash_paths=None, compactnes
     
     labeled_volume[labeled_volume == TRASH_ID] = 0
 
-    edge_id_map = {edge: label_id for label_id, edge in edge_mapping.items()}
-
-    mappings = {
-        "id_node_map": node_mapping,
-        "id_edge_map": edge_mapping,
-        "node_id_map": node_id_map,
-        "edge_id_map": edge_id_map,
-    }
+    if edges_only:
+        return labeled_volume, id_edge_map
     
-    return labeled_volume, mappings
+    return labeled_volume, id_edge_map, id_node_map
 
 def create_graph(
     skel_img: np.ndarray, 
@@ -521,14 +571,8 @@ def create_graph(
         comp_length_threshold = 1.0, 
         keep_rings = keep_rings
         )
-    
-    simple_graph.graph = {
-        "img_shape": skel_img.shape,
-        "is_2d": skel_img.ndim == 2,
-        # TODO: Choose if we should stop assuming isotropic image. When image is isotropic,
-        # there is no need for pix_size. We insert it here because it is needed by the metrics
-        "pix_size": (1.0, 1.0, 1.0) if skel_img.ndim == 3 else (1.0, 1.0)
-    }
+
+    assign_node_radii_and_outer_props(simple_graph, edt_bg)
     
     if not full_output:
         return simple_graph
@@ -539,6 +583,7 @@ def create_graph_with_mapping(
     skel_img: np.ndarray, 
     bin_img: np.ndarray, 
     length_threshold: float = 5.0,
+    edges_only: bool = True,
     keep_rings: bool = True, 
     ):
     """Creates a graph and also returns a mapping from the foreground pixels to the graph structure.
@@ -575,8 +620,9 @@ def create_graph_with_mapping(
         full_output = True
     )
 
-    labeled_volume, mappings = map_foreground_to_graph(
-        simple_graph, bin_img, edt_bg, trash_paths=trash_paths, compactness=0)
+    labeled_volume, *maps = map_foreground_to_graph(
+        simple_graph, bin_img, edt_bg, edges_only = edges_only, trash_paths=trash_paths, compactness=0.1)
     
-
-    return simple_graph, labeled_volume, mappings
+    # If edge_only is True, maps will contain only id_edge_map. Otherwise, it will contain 
+    # id_edge_map and id_node_map. 
+    return simple_graph, labeled_volume, *maps

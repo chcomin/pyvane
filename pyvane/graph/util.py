@@ -232,3 +232,82 @@ def get_outer_path_radii(graph, u, v, key, r_u, r_v, edt_bg):
     edt_vals = edt_bg[tuple(outer_path.T)]
     
     return np.mean(edt_vals), np.min(edt_vals)
+
+def map_centerline_labels_to_edges(labeled_volume, id_edge_map):
+
+    # Create map from edge_id to list of label_ids (multiple labels usually belong to the same edge)
+    edge_ids_map = {}
+    for label_id, edge_data in id_edge_map.items():
+        edge_id = edge_data['edge']
+        if edge_id not in edge_ids_map:
+            edge_ids_map[edge_id] = []    
+        edge_ids_map[edge_id].append(label_id)
+
+    labeled_elems = np.zeros_like(labeled_volume)
+
+    # Find node IDs and copy their labels directly (1-to-1 mapping)
+    ids = set(np.unique(labeled_volume).tolist())
+    ids.discard(0)
+    node_ids = ids - set(id_edge_map.keys())
+    for label_id in node_ids:
+        labeled_elems[labeled_volume == label_id] = label_id
+
+    # Map edges
+    current_id = max(node_ids) + 1 if node_ids else 1    
+    id_edge_map = {}
+    for edge_id, label_ids in edge_ids_map.items():
+        for label_id in label_ids:
+            labeled_elems[labeled_volume == label_id] = current_id
+        id_edge_map[current_id] = edge_id
+        current_id += 1
+
+    return labeled_elems, id_edge_map
+
+def construct_attribute_volume(
+        graph, 
+        labeled_volume, 
+        id_edge_map=None, 
+        edge_attr=None,
+        id_node_map=None, 
+        node_attr=None, 
+        ):
+    
+    if id_node_map is None and id_edge_map is None:
+        raise ValueError("At least one of id_node_map or id_edge_map must be provided.")
+    
+    if id_node_map is not None and node_attr is None:
+        raise ValueError("node_attr must be specified if id_node_map is provided.")
+    
+    if id_edge_map is not None and edge_attr is None:
+        raise ValueError("edge_attr must be specified if id_edge_map is provided.")
+    
+    # Build a lookup table up to the max ID found in the volume
+    max_id = labeled_volume.max()
+    lookup = np.zeros(max_id + 1, dtype=np.float32)
+
+    # Set Background to NaN
+    lookup[:] = np.nan
+
+    if id_node_map is not None:
+        # Populate Node Radii (Junctions use the fixed center radius)
+        for label_id, node_id in id_node_map.items():
+            val = graph.nodes[node_id][node_attr]
+            lookup[label_id] = val
+
+    if id_edge_map is not None:
+        # Populate Edge Radii (Outer paths use their exact smoothed 1D radius)
+        for label_id, edge_data in id_edge_map.items():
+            if isinstance(edge_data, tuple):
+                u, v, key = edge_data
+                val = graph[u][v][key][edge_attr]
+            elif isinstance(edge_data, dict):
+                u, v, key = edge_data['edge']
+                idx = edge_data["abs_idx"]
+                val = graph[u][v][key][edge_attr][idx]
+            
+            lookup[label_id] = val
+
+    # Instantly project it to the full 3D volume
+    attribute_volume = lookup[labeled_volume]
+
+    return attribute_volume

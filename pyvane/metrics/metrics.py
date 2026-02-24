@@ -4,7 +4,10 @@ import networkx as nx
 import numpy as np
 import scipy.ndimage as ndi
 
+from pyvane.graph.util import get_euclidean_trim_indices
 from pyvane.metrics.tortuosity import tortuosity as tort_func
+from pyvane.util.misc import gaussian_filter_with_anchors
+
 
 def path_length(path, pix_size, img_roi=None):
     """Calculate the arc-length of a parametric sequence of pixels.
@@ -101,8 +104,6 @@ def measure_rois(graph, img_roi, mea_funcs, to_volume=False, scale_factor=1):
         The calculated values.
     """
 
-    pix_size = graph.graph["pix_size"]
-
     img_roi = labeled_roi(img_roi)
     if to_volume:
         num_planes = graph.graph["shape"][0]
@@ -123,8 +124,12 @@ def measure_rois(graph, img_roi, mea_funcs, to_volume=False, scale_factor=1):
 
     return measured_values
 
-
-def img_volume(pix_size, img_shape, img_roi=None, scale_factor=1):
+def img_volume(
+        pix_size: tuple | np.ndarray, 
+        img_shape: tuple | np.ndarray, 
+        img_roi: np.ndarray | None = None, 
+        scale_factor: float = 1.0
+        ):
     """Calculate the volume of an image considering the physical size of the
     pixels and possible regions of interest.
 
@@ -156,7 +161,7 @@ def img_volume(pix_size, img_shape, img_roi=None, scale_factor=1):
 
     return volume
 
-def total_length(graph, img_roi=None):
+def total_length(graph, pix_size, img_roi=None):
     """Calculate the total length of the edges in the graph. The graph must contain
     attribute 'pix_size' (the physical size of the pixels) and its edges must contain
     attribute 'path' (the path represented by each edge).
@@ -174,15 +179,12 @@ def total_length(graph, img_roi=None):
         The total length.
     """
 
-    pix_size = graph.graph["pix_size"]
-
     paths = nx.get_edge_attributes(graph, "path").values()
     total_length = 0
     for path in paths:
         total_length += path_length(path, pix_size, img_roi)
 
     return total_length
-
 
 def num_branch_points(graph, img_roi=None):
     """Calculate the number of branching points of the graph. Nodes in the graph must
@@ -214,7 +216,13 @@ def num_branch_points(graph, img_roi=None):
 
     return len(list(bif_nodes))
 
-def vessel_density(graph, img_shape=None, img_roi=None, scale_factor=1):
+def vessel_density(
+        graph: nx.MultiGraph, 
+        img_shape: tuple | np.ndarray, 
+        pix_size: tuple | np.ndarray | None = None, 
+        img_roi: np.ndarray | None = None, 
+        scale_factor: float = 1.0
+        ):
     """Calculate the density of blood vessels inside an image represented by `graph`.
     The density is given by the total length of the vessels divided by the image volume.
 
@@ -236,15 +244,29 @@ def vessel_density(graph, img_shape=None, img_roi=None, scale_factor=1):
         The blood vessel density in the image.
     """
 
-    pix_size = graph.graph["pix_size"]
+    pix_size = pix_size if pix_size is not None else graph.graph.get("pix_size", None)
+    if pix_size is None:
+        pix_size = np.ones(len(img_shape), dtype=float)
 
-    length = total_length(graph, img_roi)*scale_factor
+    if len(pix_size) != len(img_shape):
+        raise ValueError("The length of pix_size must match the length of img_shape.")
+    
+    if img_roi is not None and img_roi.shape != img_shape:
+        raise ValueError("The shape of img_roi must match the shape of img_shape.")
+
+    length = total_length(graph, pix_size, img_roi)*scale_factor
     volume = img_volume(pix_size, img_shape, img_roi, scale_factor)
     density = length/volume
 
     return density
 
-def branch_point_density(graph, img_shape=None, img_roi=None, scale_factor=1):
+def branch_point_density(
+        graph: nx.MultiGraph, 
+        img_shape: tuple | np.ndarray, 
+        pix_size: tuple | np.ndarray | None = None,
+        img_roi: np.ndarray | None = None, 
+        scale_factor: float = 1.0
+        ):
     """Calculate the density of blood vessels branching points inside an image represented by `graph`.
     The density is given by the number of branching points divided by the image volume.
 
@@ -266,7 +288,15 @@ def branch_point_density(graph, img_shape=None, img_roi=None, scale_factor=1):
         The branching point density in the image.
     """
 
-    pix_size = graph.graph["pix_size"]
+    pix_size = pix_size if pix_size is not None else graph.graph.get("pix_size", None)
+    if pix_size is None:
+        pix_size = np.ones(len(img_shape), dtype=float)
+
+    if len(pix_size) != len(img_shape):
+        raise ValueError("The length of pix_size must match the length of img_shape.")
+    
+    if img_roi is not None and img_roi.shape != img_shape:
+        raise ValueError("The shape of img_roi must match the shape of img_shape.")
 
     num_bp = num_branch_points(graph, img_roi)
     volume = img_volume(pix_size, img_shape, img_roi, scale_factor)
@@ -274,7 +304,99 @@ def branch_point_density(graph, img_shape=None, img_roi=None, scale_factor=1):
 
     return bp_density
 
-def tortuosity(graph, scale, use_valid=True):
+def assign_edge_radius(graph, bin_img):
+    """
+    Calculates physiological metrics for every edge.
+    Volumes are extracted from the 3D watershed partition.
+    Radii are strictly sampled from the 1D centerline to prevent underestimation.
+    """
+
+    edt_bg = ndi.distance_transform_edt(bin_img)
+    
+    for u, v, key, data in graph.edges(keys=True, data=True):
+        
+        # Isolate the Outer Path for Radii and Length calculations
+        path = graph[u][v][key]['path']
+        path_len = len(path)
+        
+        # Enforce min -> max ordering to align with the path array
+        node_s, node_e = (u, v) if u < v else (v, u)
+        
+        # Radii of junctions (0 if not a junction)
+        r_s = graph.nodes[node_s]['radius'] if graph.degree(node_s) > 2 else 0.0
+        r_e = graph.nodes[node_e]['radius'] if graph.degree(node_e) > 2 else 0.0
+
+        trim_s, trim_e = graph[u][v][key]['trim_amount']
+        
+        # Calculate Radii from the Centerline ONLY
+        if trim_s + trim_e >= path_len:
+            # Swallowed by junctions; sample the midpoint
+            if path_len > 0:
+                mid_idx = path_len // 2
+                val = float(edt_bg[tuple(path[mid_idx])])
+            else:
+                val = float((r_s + r_e) / 2.0)
+            outer_mean, outer_min, outer_max = val, val, val
+        else:
+            outer_path = path[trim_s : path_len - trim_e]
+            edt_vals = edt_bg[tuple(outer_path.T)]
+            
+            outer_mean = float(np.mean(edt_vals))
+            outer_min = float(np.min(edt_vals))
+            outer_max = float(np.max(edt_vals))
+            
+        graph[u][v][key]['mean_radius'] = outer_mean
+        graph[u][v][key]['max_radius'] = outer_max
+        graph[u][v][key]['min_radius'] = outer_min
+        
+        # Calculate True Outer Length
+        full_length = graph[u][v][key]['length']
+        outer_length = max(0.0, float(full_length - r_s - r_e))
+        graph[u][v][key]['outer_length'] = outer_length
+        
+
+def assign_centerline_radii(graph, bin_img, smooth_sigma=1.0):
+    """
+    Extracts, corrects, and assigns a 1D array of radii to the centerline pixels.
+    Fixes junction inflation by clamping internal segments, and fixes grid 
+    staircasing using a fast 1D Gaussian filter.
+    """
+
+    edt_bg = ndi.distance_transform_edt(bin_img)
+
+    for u, v, _, data in graph.edges(keys=True, data=True):
+        path = data['path']
+        path_len = len(path)
+        
+        if path_len == 0:
+            data['radii'] = np.array([], dtype=np.float32)
+            continue
+            
+        # Direct EDT Sampling
+        # Extract the raw radius at every pixel along the path
+        radii = edt_bg[tuple(path.T)].astype(np.float32)
+        
+        # Junction Inflation Correction (The Clamping Strategy)
+        trim_s, trim_e = data['trim_amount']
+
+        # Define anchor points that must remain unchanged during smoothing
+        anchors = [trim_s, path_len - trim_e - 1]
+        if trim_s > 0:
+            anchors.append(0)
+        if trim_e > 0:
+            anchors.append(path_len - 1)
+
+        radii_s = gaussian_filter_with_anchors(radii, anchors, sigma=smooth_sigma)
+            
+        # Assign to the edge
+        data['radii'] = radii_s
+
+def tortuosity(
+        graph: nx.MultiGraph, 
+        scale: float, 
+        pix_size: tuple | np.ndarray | None = None,
+        use_valid: bool = True
+        ):
     """Calculate the tortuosity of the blood vessels represented by `graph`.
 
     Parameters
@@ -296,9 +418,14 @@ def tortuosity(graph, scale, use_valid=True):
         The tortuosity of the blood vessels.
     """
 
-    pix_size = graph.graph["pix_size"]
-    length_threshold = scale/2**0.5
-    avg_func = lambda x: sum(x)/len(x)
+    pix_size = pix_size if pix_size is not None else graph.graph.get("pix_size", None)
+    if pix_size is None:
+        pix_size = np.ones(len(graph.graph["img_shape"]), dtype=float)
 
-    return tort_func(graph, scale, length_threshold, graph_reduction_func=avg_func, path_reduction_func=avg_func,
+    length_threshold = scale/2**0.5
+    def f(x): return sum(x)/len(x)
+    avg_func = f
+
+    return tort_func(graph, scale, length_threshold, graph_reduction_func=avg_func, 
+                     path_reduction_func=avg_func,
                      pix_size=pix_size, use_valid=use_valid)

@@ -6,12 +6,8 @@ import itertools
 import networkx as nx
 import numpy as np
 import scipy.ndimage as ndi
+from scipy.ndimage import gaussian_filter1d
 
-try:
-    import igraph
-    _igraph_available = True
-except ImportError:
-    _igraph_available = False
 
 class PriorityQueue:
     """Priority queue that allows changes to, or removal of, elements of a pending task.
@@ -160,29 +156,6 @@ def remove_small_comp(img_bin, tam_threshold=20, img_label=None, structure=None)
 
     return img_bin_final
 
-def get_print_interval(n, frac=100):
-    """Utility function for getting printing interval. `n` is typically the number of iterations
-    of a loop and `frac` the number of times the message will be printed.
-
-    Parameters
-    ----------
-    n : int
-        Number of iterations.
-    frac : int
-        Number of desired messages.
-
-    Returns:
-    ------
-    print_interv : int
-        The number of iterations between two print calls.
-    """
-
-    print_interv = n//frac
-    if print_interv==0:
-        print_interv = 1
-
-    return print_interv
-
 def ips_edges_to_img(ips, edges, img_shape, node_color=(255, 0, 0), edge_color=(0, 0, 255), out_img=None):
     """Draw interest points and edges in an image. `ips` and `edges` are used in the network creation
     module.
@@ -268,193 +241,50 @@ def graph_to_img(graph, img_shape=None, node_color=(255, 0, 0), node_pixels_colo
 
     return out_img
 
-def erase_line(num_chars=80):
-
-    print("\r"+" "*num_chars, end="\r")
-
-def nx_to_igraph(graph):
-    """Convert a networkx graph to igraph. The graph can contain node and edge attributes as well as
-    graph attributes.
-
-    Parameters
-    ----------
-    graph : networkx.Graph
-        Networkx graph to convert.
-
-    Returns:
-    -------
-    ig_graph : igraph.Graph
-        The converted graph as an igraph.Graph object.
+def gaussian_filter_with_anchors(
+    y: np.ndarray, 
+    anchor_indices: list, 
+    sigma: float = 1.0, 
+    correction_sigma: float = None
+) -> np.ndarray:
     """
-
-    if not _igraph_available:
-        raise ImportError("The igraph package is required for converting to igraph format but it is not available.")
-
-    node_attrs_keys = set()
-    for node, attrs in graph.nodes(data=True):
-        [node_attrs_keys.add(k) for k in attrs]
-
-    edge_attrs_keys = set()
-    for node1, node2, attrs in graph.edges(data=True):
-        [edge_attrs_keys.add(k) for k in attrs]
-
-    node_attrs_list = dict(zip(node_attrs_keys, [[] for i in range(len(node_attrs_keys))]))
-    for node, node_attrs in graph.nodes(data=True):
-        for node_attrs_key in node_attrs_keys:
-            if node_attrs_key not in node_attrs:
-                print(f"Warning, node {node} has no attribute {node_attrs_key}.")
-                att_value = None
-            else:
-                att_value = node_attrs[node_attrs_key]
-            node_attrs_list[node_attrs_key].append(att_value)
-
-    edges = []
-    edge_attrs_list = dict(zip(edge_attrs_keys, [[] for i in range(len(edge_attrs_keys))]))
-    for node1, node2, edge_attrs in graph.edges(data=True):
-        edges.append((node1, node2))
-        for edge_attrs_key in edge_attrs_keys:
-            if edge_attrs_key not in edge_attrs:
-                print(f"Warning, edge ({node1},{node2}) has no attribute {edge_attrs_key}.")
-                att_value = None
-            else:
-                att_value = edge_attrs[edge_attrs_key]
-            edge_attrs_list[edge_attrs_key].append(att_value)
-
-    is_directed = graph.is_directed()
-    ig_graph = igraph.Graph(n=graph.number_of_nodes(), edges=edges, directed=is_directed, graph_attrs=graph.graph,
-                            vertex_attrs=node_attrs_list, edge_attrs=edge_attrs_list)
-
-    return ig_graph
-
-def igraph_to_nx(ig_graph):
-    """Convert a igraph graph to networkx. The graph can contain node and edge attributes as well as
-    graph attributes.
-
-    Parameters
-    ----------
-    ig_graph : igraph.Graph
-        igraph graph to convert.
-
+    Smooths a 1D signal to remove discretization artifacts using a Gaussian filter,
+    while strictly preserving the exact value at anchor_indices using a blending window.
+    
+    Args:
+        y: 1D numpy array containing the signal.
+        anchor_indices: The list of integer indices that must remain unchanged.
+        sigma: The standard deviation of the main Gaussian smoothing kernel.
+               For discretization, 1.0 to 2.0 is usually ideal.
+        correction_sigma: The width of the blending window for the anchor correction.
+                          If None, it defaults to the same value as `sigma`.
+                          
     Returns:
-    -------
-    graph : networkx.Graph
-        The converted graph as an networkx.Graph object.
+        A 1D numpy array of the smoothed, anchored signal.
     """
+    if correction_sigma is None:
+        correction_sigma = sigma
 
-    node_attrs_keys = ig_graph.vs.attribute_names()
-    edge_attrs_keys = ig_graph.es.attribute_names()
+    # Apply uniform Gaussian smoothing to the entire array.
+    # mode='nearest' prevents the endpoints from dipping toward zero.
+    y_smooth = gaussian_filter1d(y, sigma=sigma, mode='nearest')
 
-    is_directed = ig_graph.is_directed()
-    is_multiple = max(ig_graph.is_multiple())
-
-    if is_directed:
-        if is_multiple:
-            constructor = nx.MultiDiGraph
-        else:
-            constructor = nx.DiGraph
-    else:
-        if is_multiple:
-            constructor = nx.MultiGraph
-        else:
-            constructor = nx.Graph
-
-    graph = constructor()
-    for node_idx, node in enumerate(ig_graph.vs):
-        node_attrs = {}
-        for node_attr_key in node_attrs_keys:
-            node_attrs[node_attr_key] = node[node_attr_key]
-        graph.add_node(node_idx, **node_attrs)
-
-    for edge_idx, edge in enumerate(ig_graph.es):
-        edge_attrs = {}
-        for edge_attr_key in edge_attrs_keys:
-            edge_attrs[edge_attr_key] = edge[edge_attr_key]
-        graph.add_edge(*edge.tuple, **edge_attrs)
-
-    graph_attrs_keys = ig_graph.attributes()
-    graph.graph = {graph_attr_key:ig_graph[graph_attr_key] for graph_attr_key in graph_attrs_keys}
-
-    return graph
-
-def igraph_to_img(graph, img_shape, node_color=(255, 0, 0), node_pixels_color=(255, 255, 255),
-                 edge_color=(0, 0, 255), out_img=None):
-    """Draw igraph graph in an image.
-
-    Parameters
-    ---------
-    graph : networkx.Graph
-        Graph containing node and edge positions.
-    img_shape : tuple of int
-        Image size to draw the network.
-    node_color : tuple of int, optional
-        Color to use for the center position of a node.
-    node_pixels_color : tuple of int, optional
-        Color to use for pixels associated with a node.
-    edge_color : tuple of int, optional
-        Color to use for the edges.
-    out_img : ndarray, optional
-        If provided, the image is drawn on this array.
-
-    Returns:
-    -------
-    out_img : ndarray
-        The image drawn.
-    """
-
-    if out_img is None:
-        out_img = np.zeros((*img_shape, 3), dtype=np.uint8)
-
-    for pixels in graph.vs["pixels"]:
-        if isinstance(pixels[0], (tuple, list)):
-            for pixel in pixels:
-                out_img[tuple(pixel)] = node_pixels_color
-        else:
-            pixel = pixels
-            out_img[tuple(pixel)] = node_pixels_color
-
-    for pixel in graph.vs["center"]:
-        out_img[tuple(pixel)] = node_color
-
-    for path in graph.es["path"]:
-        for pixel in path:
-            out_img[tuple(pixel)] = edge_color
-
-    return out_img
-
-def match_graphs_igraph(ips, ig):
-    """Map indices of nodes in graph `ig` to indices of points in `ips`. Two elements match if
-    their associated pixels are identical.
-
-    Parameters
-    ----------
-    ips : list of InterestPoint
-        Bifurcations and terminations identified in an image.
-    ig : igraph.Graph
-        Graph in the igraph format.
-
-    Returns:
-    -------
-    igraph_idx_to_ip_idx : dict
-        Map having igraph nodes as keys and associated interest points indices as values. Missing
-        keys indicate that a match was not found.
-    """
-
-    igraph_idx_to_ip_idx = {}
-    for igraph_idx, v in enumerate(ig.vs):
-        ig_hash = hash(tuple(sorted(map(tuple, v["pixels"]))))
-        for ip_idx, ip in enumerate(ips):
-            ip_hash = hash(tuple(sorted(ip.pixels)))
-            if ig_hash==ip_hash:
-                igraph_idx_to_ip_idx[igraph_idx] = ip_idx
-
-    return igraph_idx_to_ip_idx
-
-if __name__=="__main__":
-
-    # Run some tests
-    nx_graph = nx.Graph()
-    nx_graph.add_nodes_from([(0, {"color":"blue"}), (1, {"color":"red"}), (2, {"color":"green"})])
-    nx_graph.add_edges_from([(0, 1, {"relation":"enemy"}), (0, 2, {"relation":"enemy"}), (1, 2, {"relation":"friend"})])
-
-    graph = nx_to_igraph(nx_graph)
-    nx_graph2 = igraph_to_nx(graph)
+    indices = np.arange(len(y))
+    
+    for anchor_idx in anchor_indices:
+        # Calculate the exact displacement at the anchor point.
+        delta = y[anchor_idx] - y_smooth[anchor_idx]
+        
+        # Create a localized Gaussian correction window centered on the anchor.
+        # This ensures the correction fades out smoothly into the surrounding data 
+        # rather than creating a sharp, artificial spike.
+        correction_window = np.exp(-0.5 * ((indices - anchor_idx) / correction_sigma)**2)
+        
+        # Blend the correction back into the smoothed signal.
+        y_smooth += delta * correction_window
+        
+    for anchor_idx in anchor_indices:
+        # Hard-enforce the anchor to eliminate any microscopic floating-point drift.
+        y_smooth[anchor_idx] = y[anchor_idx]
+    
+    return y_smooth
