@@ -1,5 +1,4 @@
 """Module for creating a graph from a binary skeleton image."""
-
 import networkx as nx
 import numpy as np
 from numba import njit, prange
@@ -16,13 +15,18 @@ from pyvane.util.misc import scalar
 
 
 @njit(parallel=True)
-def classify_pixels(img_padded):
-    """Classifies pixels into Nodes (V) and Paths (P). A path pixel is a pixel having two 
-    neighbors and these two neighbors are not adjacenct to each other. A node pixel is any
-    other foreground pixel.
+def classify_pixels(img_padded: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Classifies pixels in a 3D binary skeleton into node (V) and path (P) types.
+
+    A path pixel has exactly two neighbors that are not adjacent to each other. All other
+    foreground pixels are classified as node pixels.
 
     Args:
         img_padded: 3D binary array padded by 1 on all sides to avoid boundary checks.
+
+    Returns:
+        A tuple (mask_P, mask_V) of boolean arrays with the same shape as ``img_padded``.
+        ``mask_P`` marks path pixels and ``mask_V`` marks node pixels.
     """
     Z, Y, X = img_padded.shape
     mask_V = np.zeros_like(img_padded, dtype=np.bool_)
@@ -79,8 +83,18 @@ def classify_pixels(img_padded):
     return mask_P, mask_V
 
 @njit
-def trace_path(path_coords):
-    """Numba-optimized path tracing using array operations."""
+def trace_path(path_coords: np.ndarray) -> np.ndarray:
+    """Traces an unordered array of path coordinates into an ordered sequence.
+
+    Finds an endpoint (degree-1 pixel) and walks the chain to produce a sorted
+    coordinate array from one end to the other.
+
+    Args:
+        path_coords: Array of shape (N, 3) containing unordered path pixel coordinates.
+
+    Returns:
+        Array of shape (N, 3) with the same coordinates reordered along the path.
+    """
     n_points = path_coords.shape[0]
     if n_points <= 1:
         return path_coords
@@ -127,9 +141,14 @@ def trace_path(path_coords):
                     
     return ordered
 
-def group_coordinates_by_label(labels):
-    """Extracts coordinates for all connected components in a single pass.
-    Returns a dictionary mapping label_id -> (N, 3) coordinate array.
+def group_coordinates_by_label(labels: np.ndarray) -> dict[int, np.ndarray]:
+    """Extracts voxel coordinates for each labelled region in a single pass.
+
+    Args:
+        labels: 3D integer array where each non-zero voxel value identifies its label.
+
+    Returns:
+        Dictionary mapping each label ID to an (N, 3) array of voxel coordinates.
     """
     # Get 1D indices of all non-zero elements
     flat_indices = np.flatnonzero(labels)
@@ -160,9 +179,21 @@ def group_coordinates_by_label(labels):
         
     return grouped_coords
 
-def graph_from_skeleton(skel_img, keep_rings = True):
-    """Main function to extract an exact MultiGraph from a binary skeleton.
-    Handles both 2D and 3D arrays automatically.
+def graph_from_skeleton(skel_img: np.ndarray, keep_rings: bool = True) -> nx.MultiGraph:
+    """Extracts an exact MultiGraph from a binary skeleton image.
+
+    Classifies skeleton pixels into nodes and paths, traces each path component, and
+    connects them to form graph edges. Handles both 2D and 3D arrays.
+
+    Args:
+        skel_img: 2D or 3D binary skeleton array.
+        keep_rings: If True, isolated loops with no junction pixels are preserved as
+            self-loop edges. If False, these ring components are removed.
+
+    Returns:
+        A MultiGraph representing the skeleton topology. Each node has a ``pixels``
+        attribute with its constituent pixel coordinates and each edge has a ``path``
+        attribute with ordered pixel coordinates.
     """
 
     img_shape = skel_img.shape
@@ -215,6 +246,8 @@ def graph_from_skeleton(skel_img, keep_rings = True):
             node_coords = node_coords[:, 1:] # Drop Z coordinate for 2D
         
         graph.add_node(scalar(label_id), pixels=node_coords.astype(np.int32))
+
+    label_shape: tuple[int, int, int] = labels_V.shape # type: ignore
         
     # Topology Linking (Edge Construction)
     path_coords_dict = group_coordinates_by_label(labels_P)
@@ -235,9 +268,9 @@ def graph_from_skeleton(skel_img, keep_rings = True):
                     # but manual check here against shape is safer)
                     nzA, nyA, nxA = end_A[0]+dz, end_A[1]+dy, end_A[2]+dx
                     if (
-                        0 <= nzA < labels_V.shape[0] and 
-                        0 <= nyA < labels_V.shape[1] and 
-                        0 <= nxA < labels_V.shape[2]
+                        0 <= nzA < label_shape[0] and 
+                        0 <= nyA < label_shape[1] and 
+                        0 <= nxA < label_shape[2]
                         ):
                         val_A = labels_V[nzA, nyA, nxA]
                         if val_A > 0: 
@@ -245,9 +278,9 @@ def graph_from_skeleton(skel_img, keep_rings = True):
                         
                     nzB, nyB, nxB = end_B[0]+dz, end_B[1]+dy, end_B[2]+dx
                     if (
-                        0 <= nzB < labels_V.shape[0] and 
-                        0 <= nyB < labels_V.shape[1] and 
-                        0 <= nxB < labels_V.shape[2]
+                        0 <= nzB < label_shape[0] and 
+                        0 <= nyB < label_shape[1] and 
+                        0 <= nxB < label_shape[2]
                         ):
                         val_B = labels_V[nzB, nyB, nxB]
                         if val_B > 0: 
@@ -289,9 +322,26 @@ def graph_from_skeleton(skel_img, keep_rings = True):
 
     return graph
 
-def remove_clusters(full_graph, remove_degree_two = True, keep_rings = True):
-    """Collapses node clusters to centroids and bridges the gaps.
-    Automatically handles 2D and 3D based on G.graph['is_2d'].
+def remove_clusters(
+        full_graph: nx.MultiGraph, 
+        remove_degree_two: bool = True, 
+        keep_rings: bool = True
+        ) -> nx.MultiGraph:
+    """Collapses multi-pixel node clusters to single centroid nodes.
+
+    For each node the centroid of all constituent pixels becomes the representative
+    coordinate. Bresenham segments bridge the gap between centroids and adjacent path
+    endpoints. Optionally merges any resulting degree-2 nodes.
+
+    Args:
+        full_graph: The raw graph produced by ``graph_from_skeleton``.
+        remove_degree_two: If True, degree-2 nodes are merged into their incident edges
+            after cluster collapse.
+        keep_rings: If True, isolated loop nodes are preserved during degree-2 removal.
+
+    Returns:
+        A new MultiGraph with a ``center`` attribute on every node and a ``length``
+        attribute on every edge.
     """
     graph = full_graph.copy()
     is_2d = graph.graph.get("is_2d", False)
@@ -366,22 +416,31 @@ def remove_clusters(full_graph, remove_degree_two = True, keep_rings = True):
         
     return graph
 
-def assign_node_radii_and_outer_props(graph, edt_bg):
-    """
-    Calculates and stores the geometric radius for each node and the 
-    exact Euclidean trim indices for each edge.
+def assign_node_radii_and_outer_props(graph: nx.MultiGraph, edt_bg: np.ndarray) -> None:
+    """Calculates and stores radius and trim information for all nodes and edges.
+
+    For each node, the Euclidean distance transform value at the node's centroid is
+    stored as ``radius``. For each edge, the indices at which the path exits the
+    bounding junction spheres are stored as ``trim_amount``, along with the
+    exposed ``outer_length``.
+
+    Args:
+        graph: The graph to annotate in-place. Nodes must have a ``center`` attribute
+            and edges must have a ``path`` attribute.
+        edt_bg: Euclidean distance transform of the background, with the same spatial
+            shape as the original image.
     """
 
     for n in graph.nodes():
-        center = tuple(graph.nodes[n]['center'])
-        graph.nodes[n]['radius'] = float(edt_bg[center])
+        center = tuple(graph.nodes[n]["center"])
+        graph.nodes[n]["radius"] = float(edt_bg[center])
         
     for u, v, _, data in graph.edges(keys=True, data=True):
-        path = data['path']
+        path = data["path"]
         path_len = len(path)
         
         if path_len == 0:
-            data['trim_amount'] = (0, 0)
+            data["trim_amount"] = (0, 0)
             data["outer_length"] = 0.0
             continue
             
@@ -389,44 +448,55 @@ def assign_node_radii_and_outer_props(graph, edt_bg):
         node_start, node_end = (u, v) if u < v else (v, u)
         
         # Determine the effective trimming radius (0.0 if not a junction)
-        r_start = graph.nodes[node_start]['radius'] if graph.degree(node_start) > 2 else 0.0
-        r_end = graph.nodes[node_end]['radius'] if graph.degree(node_end) > 2 else 0.0
+        r_start = graph.nodes[node_start]["radius"] if graph.degree(node_start) > 2 else 0.0
+        r_end = graph.nodes[node_end]["radius"] if graph.degree(node_end) > 2 else 0.0
         
-        center_start = np.array(graph.nodes[node_start]['center'], dtype=np.int32)
-        center_end = np.array(graph.nodes[node_end]['center'], dtype=np.int32)
+        center_start = np.array(graph.nodes[node_start]["center"], dtype=np.int32)
+        center_end = np.array(graph.nodes[node_end]["center"], dtype=np.int32)
         
         trim_start, trim_end = get_euclidean_trim_indices(
             path, center_start, center_end, r_start, r_end
         )
         
         # Store the indices on the edge dictionary
-        data['trim_amount'] = (int(trim_start), int(trim_end))
+        data["trim_amount"] = (int(trim_start), int(trim_end))
         data["outer_length"] = max(0.0, float(path_len - r_start - r_end))
 
 def map_foreground_to_graph(
-        graph, 
-        img_bin, 
-        edt_bg, 
-        edges_only = True, 
-        compactness=0.0,
-        trash_paths=None, 
-        ):
-    """
-    Computes the Geodesic Voronoi partition of the vessel volume and maps 
-    every region strictly to its biological source (Node or Edge Pixel).
-    
+        graph: nx.MultiGraph, 
+        bin_img: np.ndarray, 
+        edt_bg: np.ndarray, 
+        edges_only: bool = True, 
+        compactness: float = 0.0,
+        trash_paths: list[np.ndarray] | None = None, 
+        ) -> tuple[np.ndarray, dict] | tuple[np.ndarray, dict, dict]:
+    """Partitions the foreground volume by assigning each voxel to a graph element.
+
+    Computes a geodesic Voronoi partition of the binary image and maps each region to
+    either a node (junction) or an edge pixel via watershed flooding.
+
+    Args:
+        graph: The refined graph whose nodes and edges define partition seeds.
+        bin_img: Binary foreground mask of the same shape as the original image.
+        edt_bg: Euclidean distance transform of the background.
+        edges_only: If True, only edge pixels are used as seeds; junction volumes are
+            not separately labelled. If False, degree->2 nodes are also labelled.
+        compactness: Compactness parameter passed to the watershed algorithm.
+        trash_paths: List of pixel coordinate arrays for removed path segments, used
+            to suppress their influence during watershed flooding.
+
     Returns:
-        labeled_voronoi: 3D int32 volume where every voxel has a unique partition ID.
-        id_node_map: Dict mapping [label_id -> node_id]. Defines junction volumes.
-        id_edge_map: Dict mapping [label_id -> ((u, v, key), path_index)]. 
-                     Defines local cross-sectional slices of exposed vessels.
+        If ``edges_only`` is True, a tuple (labeled_volume, id_cl_map). Otherwise, a
+        tuple (labeled_volume, id_cl_map, id_node_map). ``labeled_volume`` assigns each
+        foreground voxel a partition ID. ``id_cl_map`` maps label IDs to edge and
+        centerline-index data. ``id_node_map`` maps label IDs to node identifiers.
     """
-    marker_volume = np.zeros_like(img_bin, dtype=np.int32)
+    marker_volume = np.zeros_like(bin_img, dtype=np.int32)
     
     id_node_map = {}
-    id_edge_map = {}
+    id_cl_map = {}
     
-    TRASH_ID = 999999
+    TRASH_ID = -1
     
     # Burn Trash Markers
     if trash_paths:
@@ -446,13 +516,13 @@ def map_foreground_to_graph(
                 id_node_map[current_id] = n
                 node_to_id[n] = current_id
                 
-                center = tuple(graph.nodes[n]['center'])
+                center = tuple(graph.nodes[n]["center"])
                 marker_volume[center] = current_id
                 current_id += 1
             
     # Process Edges (Inner Paths vs. Outer Paths)
     for u, v, key, data in graph.edges(keys=True, data=True):
-        path = data['path']
+        path = data["path"]
         path_len = len(path)
         
         if path_len == 0:
@@ -462,14 +532,14 @@ def map_foreground_to_graph(
         node_start, node_end = (u, v) if u < v else (v, u)
         edge_id = (node_start, node_end, key)
         
-        trim_start, trim_end = data['trim_amount']
+        trim_start, trim_end = data["trim_amount"]
         if edges_only:
             trim_start, trim_end = 0, 0
 
         # Scenario A: Edge is entirely swallowed by junctions
         if trim_start + trim_end >= path_len:
             mid_idx = path_len // 2
-            if graph.degree(node_start) > 2:
+            if graph.degree(node_start) > 2 and mid_idx > 0:
                 marker_volume[tuple(path[:mid_idx].T)] = node_to_id[node_start]
             if graph.degree(node_end) > 2:
                 marker_volume[tuple(path[mid_idx:].T)] = node_to_id[node_end]
@@ -487,25 +557,25 @@ def map_foreground_to_graph(
             for i in range(trim_start, path_len - trim_end):
                 coord = tuple(path[i].tolist())
                 marker_volume[coord] = current_id
-                id_edge_map[current_id] = {
-                    'edge': edge_id,
-                    'abs_idx': i,                 
-                    'outer_idx': i - trim_start,  
-                    'coord': coord                
+                id_cl_map[current_id] = {
+                    "edge": edge_id,
+                    "abs_idx": i,                 
+                    "outer_idx": i - trim_start,  
+                    "coord": coord                
                 }
                 current_id += 1
 
     # Execute Topographical Flooding
     topography = -edt_bg
     labeled_volume = watershed(
-        topography, marker_volume, mask=img_bin, connectivity=3, compactness=compactness)
+        topography, marker_volume, mask=bin_img, connectivity=3, compactness=compactness) # type: ignore
     
     labeled_volume[labeled_volume == TRASH_ID] = 0
 
     if edges_only:
-        return labeled_volume, id_edge_map
+        return labeled_volume, id_cl_map
     
-    return labeled_volume, id_edge_map, id_node_map
+    return labeled_volume, id_cl_map, id_node_map
 
 def create_graph(
     skel_img: np.ndarray, 
@@ -513,7 +583,7 @@ def create_graph(
     length_threshold: float = 5.0,
     keep_rings: bool = True, 
     full_output: bool = False
-    ):
+    ) -> nx.MultiGraph | tuple[nx.MultiGraph, np.ndarray, list[np.ndarray]]:
     """Main function to create a graph from a skeleton image and its corresponding binary mask.
     
     The function performs the following steps:
@@ -538,14 +608,13 @@ def create_graph(
         bin_img: 2D or 3D binary array representing the original foreground mask.
         length_threshold: Minimum length for edges, in voxels, to be retained during refinement.
         keep_rings: Whether to keep pure rings (isolated loops) in the graph.
-        full_output: If True, also returns the Euclidean distances and the list of removed paths 
-        during refinement. These are useful for mapping foreground pixels to the final graph 
-        structure
+        full_output: If True, also returns the Euclidean distance transform and the list
+            of paths removed during refinement.
 
     Returns:
-        simple_graph: The refined graph structure after all processing steps.
-        edt_bg (optional): The Euclidean distance transform of the background.
-        trash_paths (optional): List of paths that were removed during refinement.
+        The refined graph, or a tuple (graph, edt_bg, trash_paths) when ``full_output``
+        is True. ``edt_bg`` is the Euclidean distance transform of the background;
+        ``trash_paths`` lists pixel coordinate arrays removed during refinement.
     """
 
     # Create initial graph that represents all skeleton pixels as accurately as possible
@@ -585,7 +654,7 @@ def create_graph_with_mapping(
     length_threshold: float = 5.0,
     edges_only: bool = True,
     keep_rings: bool = True, 
-    ):
+    ) -> tuple[nx.MultiGraph, np.ndarray, dict] | tuple[nx.MultiGraph, np.ndarray, dict, dict]:
     """Creates a graph and also returns a mapping from the foreground pixels to the graph structure.
     
     Please see `create_graph` for details on the graph creation process. This function extends 
@@ -596,33 +665,38 @@ def create_graph_with_mapping(
         skel_img: 2D or 3D binary array representing the skeletonized image.
         bin_img: 2D or 3D binary array representing the original foreground mask.
         length_threshold: Minimum length for edges to be retained during refinement.
-        keep_rings: Whether to keep pure rings (isolated loops) in the graph.
+        edges_only: If True, pixels are only mapped to graph edges. If False, pixels are
+            also mapped to junction nodes when they are closer to a junction than to an
+            edge.
+        keep_rings: Whether to preserve pure ring structures in the graph.
 
     Returns:
-        simple_graph: The refined graph structure after all processing steps.
-        labeled_volume: A 3D or 2D array where each foreground pixel is labeled with a unique ID.
-        mappings: A dictionary containing the mappings between graph nodes and edges and their 
-        corresponding IDs in the labeled volume. The mappings are:
-            - "id_node_map": Dictionary from volume IDs to graph node identifiers.
-            - "id_edge_map": Dictionary from labeled volume IDs to graph edge
-                (tuples of (u, v, key)).
-            - "node_id_map": Dictionary from graph node identifiers to labeled volume IDs. Note
-                that only nodes with degree > 2 are keys in this dictionary.
-            - "edge_id_map": Dictionary from graph edge identifiers (tuples of (u, v, key)) to 
-                labeled volume IDs.
+        A tuple (graph, labeled_volume, id_cl_map) when ``edges_only`` is True, or
+        (graph, labeled_volume, id_cl_map, id_node_map) when False. ``labeled_volume``
+        assigns each foreground voxel a unique label. ``id_cl_map`` maps label IDs to
+        edge and centerline-index information. ``id_node_map`` maps label IDs to node
+        identifiers (only present when ``edges_only`` is False).
     """ 
 
     simple_graph, edt_bg, trash_paths = create_graph(
-        skel_img, 
-        bin_img,
+        skel_img = skel_img, 
+        bin_img = bin_img,
         length_threshold = length_threshold,
         keep_rings = keep_rings, 
         full_output = True
     )
 
     labeled_volume, *maps = map_foreground_to_graph(
-        simple_graph, bin_img, edt_bg, edges_only = edges_only, trash_paths=trash_paths, compactness=0.1)
+        graph = simple_graph, 
+        bin_img = bin_img, 
+        edt_bg = edt_bg, 
+        edges_only = edges_only, 
+        compactness = 0.1,
+        trash_paths = trash_paths
+        )
     
-    # If edge_only is True, maps will contain only id_edge_map. Otherwise, it will contain 
-    # id_edge_map and id_node_map. 
-    return simple_graph, labeled_volume, *maps
+    output = (simple_graph, labeled_volume, maps[0])
+    if not edges_only:
+        output += (maps[1],)
+
+    return output

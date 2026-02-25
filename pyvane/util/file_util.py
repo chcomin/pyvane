@@ -2,25 +2,26 @@
 
 import copy
 from collections import deque
+from collections.abc import Callable, Generator
 from pathlib import Path
 from shutil import copy2
+from typing import Any
 
 import natsort
 
 
 class Tree:
-    """Class representing a directed tree. If you want node and edge attributes, the tree should
-    be build incrementally, passing None in the constructor for both `nodes` and `edges`.
+    """Class representing a directed tree.
 
-    Parameters
-    ----------
-    nodes : list of hashable objects, optional
-        List of hashable objects.
-    edges : list of tuples, optional
-        List of tuples indicating adjacent nodes in the form (node1, node2).
+    If you want node and edge attributes, the tree should be built incrementally,
+    passing None in the constructor for both `nodes` and `edges`.
     """
 
-    def __init__(self, nodes=None, edges=None):
+    def __init__(self, nodes: dict | None = None, edges: dict | None = None) -> None:
+        """Args:
+        nodes: List of hashable objects representing the tree nodes.
+        edges: List of tuples indicating adjacent nodes in the form (node1, node2).
+        """
 
         if nodes is None:
             nodes = {}
@@ -30,15 +31,15 @@ class Tree:
         self.edges = edges
         self.nodes = nodes
 
-    def add_node(self, node, attrs=None):
-        """Add a node to the tree. A ValueError is raised if the node is already in the tree.
+    def add_node(self, node: Any, attrs: dict | None = None) -> None:
+        """Adds a node to the tree.
 
-        Parameters
-        ----------
-        node : hashable
-            Node do add to the graph. Usually, it is a number or a string.
-        attrs : dict, optional
-            Dictionary containing node attributes.
+        Args:
+            node: Node to add to the tree. Usually a number or a string.
+            attrs: Dictionary containing node attributes.
+
+        Raises:
+            ValueError: If the node is already in the tree.
         """
 
         if attrs is None:
@@ -50,18 +51,18 @@ class Tree:
 
         nodes[node] = attrs
 
-    def add_edge(self, source, target, attrs=None):
-        """Add a directed edge to the tree. A ValueError is raised if the nodes are not in the tree.
-        If the edge is already in the tree, the attributes are updated.
+    def add_edge(self, source: Any, target: Any, attrs: dict | None = None) -> None:
+        """Adds a directed edge to the tree.
 
-        Parameters
-        ----------
-        source : hashable
-            Parent node.
-        target : hashable
-            Target node.
-        attrs : dict, optional
-            Dictionary containing edge attributes.
+        If the edge already exists, its attributes are updated.
+
+        Args:
+            source: Parent node.
+            target: Child/target node.
+            attrs: Dictionary containing edge attributes.
+
+        Raises:
+            ValueError: If either source or target node is not in the tree.
         """
 
         if attrs is None:
@@ -80,20 +81,15 @@ class Tree:
         else:
             edges[source][target] = attrs
 
-    def get_nodes(self, data=False):
-        """Get nodes in the graph.
+    def get_nodes(self, data: bool = False) -> list:
+        """Returns nodes in the tree.
 
-        Parameters
-        ----------
-        data : bool
-            If `data=False`, returns a list containing node names, otherwise returns
-            a list containing tuples in the form (node, attrs), where attrs is the
-            dictionary of attributes of the node.
+        Args:
+            data: If False, returns a list of node names. If True, returns a list of
+                (node, attrs) tuples where attrs is the node attribute dictionary.
 
         Returns:
-        -------
-        list
-             List of nodes. See definition of parameter `data` for a description of the returned value.
+            List of node names, or list of (node, attrs) tuples if `data=True`.
         """
 
         if data:
@@ -101,20 +97,17 @@ class Tree:
         else:
             return list(self.nodes.keys())
 
-    def get_edges(self, data=False):
-        """Get edges in the graph.
+    def get_edges(self, data: bool = False) -> list:
+        """Returns edges in the tree.
 
-        Parameters
-        ----------
-        data : bool
-            If `data=False`, returns a list of tuples containing the edges, otherwise returns
-            a list containing tuples in the form (source, target, attrs), where attrs is the
-            dictionary of attributes of the edge.
+        Args:
+            data: If False, returns a list of (source, target) tuples. If True, returns
+                a list of (source, target, attrs) tuples where attrs is the edge attribute
+                dictionary.
 
         Returns:
-        -------
-        list
-             List of edges. See definition of parameter `data` for a description of the returned value.
+            List of (source, target) tuples, or (source, target, attrs) tuples if
+            `data=True`.
         """
 
         edges = self.edges
@@ -128,67 +121,66 @@ class Tree:
 
         return edge_list
 
-    def successors(self, node):
-        """Return neighbors that are successors of a node.
+    def successors(self, node: Any) -> list:
+        """Returns the successors of a node.
 
-        Parameters
-        ----------
-        node : hashable
-            A node in the tree.
+        Args:
+            node: A node in the tree.
 
         Returns:
-        -------
-        list
             List of nodes that are successors of `node`.
+
+        Raises:
+            ValueError: If the node is not in the tree.
         """
 
         try:
             successors = self.edges[node]
-        except KeyError:
-            raise ValueError("Node is not in the tree.")
+        except KeyError as e:
+            raise ValueError("Node is not in the tree.") from e
 
         return list(successors.keys())
 
-    def copy(self):
-        """Creates a copy of the tree.
+    def copy(self) -> "Tree":
+        """Creates a deep copy of the tree.
 
         Returns:
-        -------
-        Tree
-            A copy of the tree.
+            A new Tree instance with copies of all nodes and edges.
         """
 
         return Tree(copy.deepcopy(self.get_nodes(True)), copy.deepcopy(self.get_edges(True)))
 
 class FileTree(Tree):
-    """Class representing a file and directory tree. Each node represents a file or directory. The
-    name of a node is the absolute path of the respective file or directory. The tree needs to be
-    created from an existing directory in the system.
+    """Class representing a file and directory tree.
 
-    Parameters
-    ----------
-    root_path : Union[str, Path]
-        The path for the root of the tree.
-    name_filter : func
-        Function that receives the name of a file or directory and returns True if the item should be
-        added to the tree or False otherwise. For directories, files and subdirectories inside each
-        directory will also not be added.
+    Each node represents a file or directory, identified by its absolute path. The
+    tree is constructed from an existing directory in the file system.
     """
 
-    def __init__(self, root_path, name_filter=None):
+    def __init__(
+            self,
+            root_path: str | Path,
+            name_filter: Callable[[str], bool] | None = None,
+            ) -> None:
+        """Args:
+        root_path: The path of the root directory.
+        name_filter: Function that receives a file or directory name and returns True
+            if the item should be included. If False for a directory, its contents
+            are also excluded.
+        """
         super().__init__()
 
         if name_filter is None:
-            name_filter = lambda x: True
+            def f(x): return True
+            name_filter = f
 
         self.root_path = Path(root_path)
         self.name_filter = name_filter
 
         self._build_tree()
 
-    def _build_tree(self):
-        """Builds the tree.
-        """
+    def _build_tree(self) -> None:
+        """Builds the tree."""
 
         root_path = self.root_path
         self.add_node(root_path)
@@ -205,15 +197,14 @@ class FileTree(Tree):
                         self.add_node(child)
                         self.add_edge(file, child)
 
-    def get_files(self):
-        """Return absolute paths for all files in the tree (that is, directories are not included). The
-        function uses method Path.is_file() from pathlib. Therefore, all files and directories in the tree
-        must exist for the function to work.
+    def get_files(self) -> list[Path]:
+        """Returns absolute paths for all files in the tree.
+
+        Directories are excluded. Requires all paths in the tree to exist on the
+        file system (uses `Path.is_file()`).
 
         Returns:
-        -------
-        list of Path
-            Nodes in the tree representing files.
+            Sorted list of Path objects representing files in the tree.
         """
 
         files = []
@@ -223,15 +214,14 @@ class FileTree(Tree):
 
         return natsort.natsorted(files)
 
-    def get_directories(self):
-        """Return absolute paths for all directories in the tree (that is, files are not included). The
-        function uses method Path.is_dir() from pathlib. Therefore, all files and directories in the tree
-        must exist for the function to work.
+    def get_directories(self) -> list[Path]:
+        """Returns absolute paths for all directories in the tree.
+
+        Files are excluded. Requires all paths in the tree to exist on the
+        file system (uses `Path.is_dir()`).
 
         Returns:
-        -------
-        list of Path
-            Nodes in the tree representing directories.
+            Sorted list of Path objects representing directories in the tree.
         """
 
         directories = []
@@ -241,18 +231,17 @@ class FileTree(Tree):
 
         return natsort.natsorted(directories)
 
-    def get_paths_from_name(self, file_name):
-        """Return absolute paths for files in the tree having name `file_name`. More than one
-        path will be returned if the tree contains more than one file with the same name.
+    def get_paths_from_name(self, file_name: str | Path) -> list[Path]:
+        """Returns absolute paths for files in the tree having name `file_name`.
 
-        Parameters
-        ----------
-        file_name : Union[str, Path]
+        More than one path is returned if the tree contains multiple files with the
+        same name.
+
+        Args:
+            file_name: The file name (including extension) to search for.
 
         Returns:
-        -------
-        list of Path
-            The files in the tree having name `file_name`.
+            Sorted list of Path objects matching `file_name`.
         """
 
         paths = []
@@ -262,34 +251,19 @@ class FileTree(Tree):
 
         return natsort.natsorted(paths)
 
-    def change_root(self, new_root):
-        """Change the absolute path of the root for a tree containing a directory structure. Returns
-        a new tree of type Tree, since the files probably do not exist in the system and many methods
-        from FileTree will not work.
+    def change_root(self, new_root: str | Path) -> "Tree":
+        """Returns a new tree with the root path replaced by `new_root`.
 
-        For instance, suppose a tree contains the following paths:
+        Returns a plain Tree (not FileTree), since the new paths likely do not exist
+        on the file system. For example, for a tree rooted at /dir1/dir2/ with children
+        /dir1/dir2/file1 and /dir1/dir2/file2, calling this function with
+        `new_root=/codes` returns a tree with nodes /codes, /codes/file1, /codes/file2.
 
-        root: /dir1/dir2/
-        child1: /dir1/dir2/file1
-        child2: /dir1/dir2/file2
-
-        Calling this function with `new_root=/codes` will return a tree with nodes
-
-        root: /codes
-        child1: /codes/file1
-        child2: /codes/file2
-
-        Parameters
-        ----------
-        new_root : Union[str, Path]
-            The new root.
+        Args:
+            new_root: The new root path.
 
         Returns:
-        -------
-        new_file_tree : Tree
-            A new tree with file and directory paths containing a new root. Note that the files and
-            directories in the returned tree probably do not exist in the system and many methods
-            from FileTree will not work.
+            A new Tree whose node paths have been rebased onto `new_root`.
         """
 
         new_root = Path(new_root)
@@ -310,64 +284,50 @@ class FileTree(Tree):
 
         return new_file_tree
 
-def get_files(root_path, name_filter=None):
-    """Recursively get all files and directories inside `root_path`.
+def get_files(
+        root_path: str | Path,
+        name_filter: Callable[[str], bool] | None = None,
+        ) -> tuple[FileTree, list[Path]]:
+    """Recursively discovers all files and directories inside `root_path`.
 
-    Parameters
-    ----------
-    root_path : Union[str, Path]
-        Root directory.
-    name_filter : func
-        Function that receives the name of a file or directory and returns True if the item should be
-        added to the tree or False otherwise. For directories, files and subdirectories inside each
-        directory will also not be added.
+    Args:
+        root_path: Root directory to search.
+        name_filter: Function that receives a file or directory name and returns True
+            if the item should be included. If False for a directory, its contents
+            are also excluded.
 
     Returns:
-    -------
-    FileTree
-        A tree representing a file and directory tree. Each node represents a file or directory. The
-        name of a node is the absolute path of the respective file or directory.
-    list of Path
-        A list of all files inside `root_path`, excluding files in `exclude_names`.
+        A tuple (file_tree, files) where file_tree is a FileTree representing the
+        directory structure and files is a sorted list of all file paths found.
     """
 
     file_tree = FileTree(root_path, name_filter)
 
     return file_tree, file_tree.get_files()
 
-def directory_has_file(path):
-    """Check if a directory has at least one file.
+def directory_has_file(path: str | Path) -> bool:
+    """Checks if a directory contains at least one file.
 
-    Parameters
-    ----------
-    path : Union[str, Path]
-        A path in the system.
+    Args:
+        path: Path to the directory to check.
 
     Returns:
-    -------
-    bool
-        Returns True if the directory contains at least one file. Returns False otherwise.
+        True if the directory contains at least one file, False otherwise.
     """
 
     path = Path(path)
+    return any(file.is_file() for file in path.iterdir())
 
-    for file in path.iterdir():
-        if file.is_file():
-            return True
-    return False
+def iterate_directory_path(path: str | Path) -> Generator:
+    """Yields each prefix of a path with increasing depth.
 
-def iterate_directory_path(path):
-    """For path x/y/z, yields a list [x, x/y, x/y/z].
+    For example, for path x/y/z, yields x, x/y, x/y/z in order.
 
-    Parameters
-    ----------
-    path : Union[str, Path]
-        A file path
+    Args:
+        path: A file or directory path.
 
     Yields:
-    ------
-    Path
-        Sequence of paths with increasing depth.
+        Each partial path from the first component up to the full path.
     """
 
     path = Path(path)
@@ -377,39 +337,75 @@ def iterate_directory_path(path):
         par_path = par_path/dir
         yield par_path
 
-def create_directory(directory):
-    """Creates a directory and any parent directory that do not exist in the system. For instance,
-    for the path x/y/z, directories x, x/y and x/y/z will be created if they do not exist.
+def create_directory(directory: str | Path) -> None:
+    """Creates a directory and all missing parent directories.
 
-    Parameters
-    ----------
-    directory : Union[str, Path]
-        A directory.
+    For example, for path x/y/z, directories x, x/y, and x/y/z will be created
+    if they do not already exist.
+
+    Args:
+        directory: Path to the directory to create.
     """
 
     directory = Path(directory)
     for dir in iterate_directory_path(directory):
-        if not dir.exists(): dir.mkdir()
+        if not dir.exists(): 
+            dir.mkdir()
 
-def get_file_tag(file, directory=None, sep="@", include_ext=False):
+def get_file_tag(
+        file: Path,
+        directory: str | None = None,
+        sep: str = "@",
+        include_ext: bool = False,
+        ) -> str:
+    """Builds a flat tag string encoding the path of a file.
 
-        file_parts = file.parts
-        if directory is not None:
-            ind = file_parts.index(directory)
-            file_parts = file_parts[ind+1:]
+    Joins path components with `sep` to create a unique flat filename that preserves
+    path hierarchy information. Useful for flattening directory structures.
 
-        if include_ext:
-            tag = sep.join(file_parts)
+    Args:
+        file: The file path to encode.
+        directory: If provided, only path components after this directory name are used.
+        sep: Separator used to join path components.
+        include_ext: If True, includes the file extension in the tag.
+
+    Returns:
+        A flat string tag encoding the file's relative path.
+    """
+
+    file_parts = file.parts
+    if directory is not None:
+        ind = file_parts.index(directory)
+        file_parts = file_parts[ind+1:]
+
+    if include_ext:
+        tag = sep.join(file_parts)
+    else:
+        tag = sep.join(file_parts[:-1])
+        if len(tag)>0:
+            tag += sep+file.stem
         else:
-            tag = sep.join(file_parts[:-1])
-            if len(tag)>0:
-                tag += sep+file.stem
-            else:
-                tag = file.stem
+            tag = file.stem
 
-        return tag
+    return tag
 
-def flatten_directory(in_folder, out_folder, name_filter=None, sep="@"):
+def flatten_directory(
+        in_folder: str | Path,
+        out_folder: str | Path,
+        name_filter: Callable[[str], bool] | None = None,
+        sep: str = "@",
+        ) -> None:
+    """Copies all files from a nested directory into a single flat directory.
+
+    Each file is renamed using `get_file_tag` so that its original path hierarchy
+    is encoded in the filename using `sep` as a separator.
+
+    Args:
+        in_folder: Source directory to flatten.
+        out_folder: Destination directory where flattened files are copied.
+        name_filter: Optional filter function for including/excluding files by name.
+        sep: Separator used to encode subdirectory names in the flat filename.
+    """
 
     in_folder = Path(in_folder)
     directory = in_folder.parts[-1]
@@ -418,18 +414,25 @@ def flatten_directory(in_folder, out_folder, name_filter=None, sep="@"):
         file_tag = get_file_tag(file, directory, sep, include_ext=True)
         copy2(file, out_folder/file_tag)
 
-def make_directories(file_tree, out_dir, gen_step_dirs=None, gen_subdirs=None):
-    """Make directories for saving experiment data.
+def make_directories(
+        file_tree: FileTree,
+        out_dir: str | Path,
+        gen_step_dirs: list | None = None,
+        gen_subdirs: list | None = None,
+        ) -> None:
+    """Creates a mirrored output directory structure from a file tree.
 
-    Parameters
-    ----------
-    param : list
-        Description
+    For each directory in `file_tree` that contains at least one file, creates
+    step subdirectories under `out_dir` and optional leaf subdirectories within
+    each step directory.
 
-    Returns:
-    -------
-    param : int
-        Description
+    Args:
+        file_tree: The source file tree whose directory structure is mirrored.
+        out_dir: Root output directory where new directories are created.
+        gen_step_dirs: List of step directory names to create under each mirrored
+            directory. If None, no directories are created.
+        gen_subdirs: List of subdirectory names to create inside each step directory.
+            If None, no subdirectories are created.
     """
 
     if gen_step_dirs is None:

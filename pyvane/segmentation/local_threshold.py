@@ -8,33 +8,27 @@ from pyvane.util.misc import remove_small_comp
 
 
 def vessel_segmentation(img, threshold, sigma=None, radius=40, comp_size=500, hole_size=None):
-    """Blood vessel segmentation using adaptive thresholding. In short terms, for each
-    pixel, if img[pixel]-avg(img[window])>threshold the pixel is marked as blood vessel,
-    where window is a region centered at the pixel. The function also removes connected
-    components smaller than `comp_size`.
+    """Segments blood vessels using adaptive thresholding.
 
-    Parameters
-    ----------
-    img : Image
-        Image to be segmented. Can be 2D or 3D.
-    threshold : float
-        Pixels with values larger than avg(img[window])+threshold are blood vessel candidates, where
-        window is a region centered at the pixel.
-    sigma : list of float, optional
-        Gaussian standard deviations for smoothing the image before thresholding. The values should
-        be given as physical units (e.g., micrometers). If None, unitary values are used.
-    radius : int
-        Window size to use for intensity averaging. Since a Gaussian is used, this is actually
-        2x the standard deviation of the Gaussian used for averaging pixel intensities. Note
-        that this Gaussian is different than the one defined by parameter `sigma`. The value
-        is in pixels.
-    comp_size : int
-        Connected components smaller than `comp_size` are removed from the image.
+    For each pixel, marks it as a vessel candidate when
+    ``img[pixel] - avg(img[window]) > threshold``, where ``window`` is a Gaussian-weighted
+    region centred on the pixel. Small connected components are removed afterwards.
+
+    Args:
+        img: Input image (2D or 3D). Accepts an Image object or a plain ndarray.
+        threshold: Pixels with values above the local average by more than this value
+            are classified as vessels.
+        sigma: Gaussian standard deviations for pre-smoothing, in physical units. If
+            None, unit sigma is used for each dimension.
+        radius: Controls the Gaussian averaging window; the standard deviation of the
+            averaging Gaussian is ``radius / 2`` (in pixels).
+        comp_size: Connected components smaller than this number of pixels are removed.
+        hole_size: For 2D images, background (hole) components smaller than this are
+            filled. Not applied to 3D images.
 
     Returns:
-    -------
-    Image
-        A binary image containing segmented blood vessels.
+        Binary image with segmented vessels. Returns an ndarray if the input was an
+        ndarray, otherwise returns an Image object.
     """
 
     ndim = img.ndim
@@ -61,7 +55,8 @@ def vessel_segmentation(img, threshold, sigma=None, radius=40, comp_size=500, ho
     img_data_diffused = ndi.gaussian_filter(img_data, sigma=sigma/pix_size)
 
     if ndim==2:
-        img_final = _vessel_segmentation_2d(img_data_diffused, threshold, radius, comp_size, hole_size)
+        img_final = _vessel_segmentation_2d(img_data_diffused, threshold, radius, comp_size, 
+                                            hole_size)
     elif ndim==3:
         img_final = _vessel_segmentation_3d(img_data_diffused, threshold, radius, comp_size)
 
@@ -71,8 +66,7 @@ def vessel_segmentation(img, threshold, sigma=None, radius=40, comp_size=500, ho
     return Image(img_final.astype(np.uint8), img_path, pix_size=pix_size)
 
 def _vessel_segmentation_2d(img_data, threshold, radius=40, comp_size=500, hole_size=None):
-    """Blood vessel segmentation of a 2D image. See function `vessel_segmentation` for details.
-    """
+    """Blood vessel segmentation of a 2D image. See function `vessel_segmentation` for details."""
 
     if img_data.dtype!=float:
         img_data = img_data.astype(float)
@@ -88,8 +82,7 @@ def _vessel_segmentation_2d(img_data, threshold, radius=40, comp_size=500, hole_
     return img_final
 
 def _vessel_segmentation_3d(img_data, threshold, radius=40, comp_size=500):
-    """Blood vessel segmentation of a 3D image. See function `vessel_segmentation` for details.
-    """
+    """Blood vessel segmentation of a 3D image. See function `vessel_segmentation` for details."""
 
     if img_data.dtype!=float:
         img_data = img_data.astype(float)
@@ -108,24 +101,19 @@ def _vessel_segmentation_3d(img_data, threshold, radius=40, comp_size=500):
     return img_final
 
 def adaptive_thresholding(img_data, threshold, radius):
-    """Segmentation using adaptive thresholding of a bright object on a dark background. In short
-    terms, for each pixel, if img_data[pixel]-avg(img_data[window])>threshold the pixel is marked
-    as belonging to the object, where window is a region centered at the pixel.
+    """Applies adaptive thresholding to segment a bright object on a dark background.
 
-    Parameters
-    ----------
-    img_data : ndarray
-        Image to be thresholded. Must be 2D.
-    threshold : float
-        Threshold to decide if a pixel belongs to the object.
-    radius : int
-        Window size to use for intensity averaging. Since a Gaussian is used, this is actually
-        2x the standard deviation of the Gaussian used for averaging pixel intensities.
+    For each pixel, marks it as foreground when
+    ``img_data[pixel] - avg(img_data[window]) > threshold``, where the window average
+    is computed with a Gaussian filter of standard deviation ``radius / 2``.
+
+    Args:
+        img_data: 2D input image to threshold.
+        threshold: Pixels above the local average by more than this value are foreground.
+        radius: Controls the averaging window; standard deviation equals ``radius / 2``.
 
     Returns:
-    -------
-    img_bin : ndarray
-        The resulting binary image.
+        Binary boolean array where True indicates foreground pixels.
     """
 
     if img_data.dtype!=float:

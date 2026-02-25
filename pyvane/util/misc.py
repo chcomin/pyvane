@@ -2,6 +2,8 @@
 
 import heapq
 import itertools
+from collections.abc import Hashable
+from typing import Any
 
 import networkx as nx
 import numpy as np
@@ -10,22 +12,22 @@ from scipy.ndimage import gaussian_filter1d
 
 
 class PriorityQueue:
-    """Priority queue that allows changes to, or removal of, elements of a pending task.
+    """Priority queue that allows changes to, or removal of, elements of a pending task."""
 
-    Parameters
-    ----------
-    priorities : list of Union[int, float]
-        The priorities of the task. Lower values are executed first. The values can actually be
-        any type that can be compared, that is, it must be possible to define which value is
-        lower. If None, an empty queue is created.
-    keys : list of hashable
-        List containing a unique key for each task. Must have the same size as `priorities`.
-    data : list, optional
-        Data to associate to each task. The elements can be any object. Must have the same size
-        as `priorities`. If None, all tasks will have None as data.
-    """
-
-    def __init__(self, priorities=None, keys=None, data=None):
+    def __init__(
+            self,
+            priorities: list | None = None,
+            keys: list | None = None,
+            data: list | None = None,
+            ) -> None:
+        """Args:
+        priorities: The priorities of the tasks. Lower values are executed first. The value
+            can be any comparable type. If None, an empty queue is created.
+        keys: List of unique keys for each task. Must have the same length as `priorities`.
+        data: Data to associate with each task. Elements can be any object. Must have the
+            same length as `priorities`. If None, all tasks will have data set to None.
+        """
+        
 
         if priorities is None:
             if keys is None:
@@ -45,7 +47,7 @@ class PriorityQueue:
 
         entries = list(map(list, zip(priorities, range(num_entries), keys, data)))
         heapq.heapify(entries)
-        _, _, keys, _ = zip(*entries)      # Obtain keys again since the order of the entries has changed
+        _, _, keys, _ = zip(*entries) # Obtain keys again since the order of the entries has changed
         entries_map = dict(zip(keys, entries))
 
         self.queue = entries
@@ -53,19 +55,14 @@ class PriorityQueue:
         self.counter = itertools.count(start=num_entries)
         self.removed_tag = "<removed>"
 
-    def add_task(self, priority, key, data=None):
-        """Add a new task or update the priority of an existing task.
+    def add_task(self, priority: float, key: Hashable, data: Any = None) -> None:
+        """Adds a new task or updates the priority of an existing task.
 
-        Parameters
-        ----------
-        priority : Union[int, float]
-            The priority of the task. Lower values are executed first. The values can actually be
-            any type that can be compared, that is, it must be possible to define which value is
-            lower.
-        key : hashable
-            Unique key for the task.
-        data : object, optional
-            Data to associate to the task.
+        Args:
+            priority: The priority of the task. Lower values are executed first. The value
+                can be any comparable type.
+            key: Unique key for the task.
+            data: Data to associate with the task.
         """
 
         entries_map = self.entries_map
@@ -77,43 +74,52 @@ class PriorityQueue:
         entries_map[key] = entry
         heapq.heappush(self.queue, entry)
 
-    def remove_task(self, key):
-        """Mark an existing task as removed.  Raises KeyError if not found.
+    def remove_task(self, key: Hashable) -> None:
+        """Marks an existing task as removed.
 
-        Parameters
-        ----------
-        key : hashable
-            The key of the task.
+        Args:
+            key: The key of the task.
+
+        Raises:
+            KeyError: If the key is not found in the queue.
         """
 
         entry = self.entries_map.pop(key)
         entry[-1] = self.removed_tag
 
-    def pop_task(self):
-        """Remove and return the lowest priority task. Raises KeyError if empty.
+    def pop_task(self) -> tuple[Any, Hashable, Any]:
+        """Removes and returns the lowest priority task.
 
         Returns:
-        -------
-        tuple
-            A tuple associated with the task, with elements (priority, key, data).
+            A tuple (priority, key, data) for the lowest-priority pending task.
+
+        Raises:
+            KeyError: If the queue is empty.
         """
 
         queue = self.queue
         while queue:
-            priority, count, key, data = heapq.heappop(queue)
+            priority, _, key, data = heapq.heappop(queue)
             if data!=self.removed_tag:
                 del self.entries_map[key]
                 return (priority, key, data)
 
         raise KeyError("pop from an empty priority queue")
 
-    def __len__(self):
+    def __len__(self) -> int:
 
         return len(self.entries_map)
 
-def scalar(val):
-    """Utility function for converting a 0-dim array to a scalar value. If `val` is not a 0-dim 
-    array, it is returned unchanged.
+def scalar(val: Any) -> Any:
+    """Converts a 0-dim numpy array to a Python scalar value.
+
+    If `val` is not a 0-dim array, it is returned unchanged.
+
+    Args:
+        val: Value to convert. Can be a 0-dim numpy array or any other type.
+
+    Returns:
+        A Python scalar if `val` is a 0-dim array, otherwise `val` unchanged.
     """
 
     if hasattr(val, "item"):
@@ -121,25 +127,25 @@ def scalar(val):
     else:
         return val
 
-def remove_small_comp(img_bin, tam_threshold=20, img_label=None, structure=None):
-    """For a binary image, remove connected components smaller than `tam_threshold`. If `img_label`
-    is not None, use the provided labels as components.
+def remove_small_comp(
+        img_bin: np.ndarray,
+        tam_threshold: int = 20,
+        img_label: np.ndarray | None = None,
+        structure: np.ndarray | None = None,
+        ) -> np.ndarray:
+    """Removes connected components smaller than `tam_threshold` from a binary image.
 
-    Parameters
-    ----------
-    img_bin : ndarray
-        Binary image.
-    tam_threshold : int
-        Size threshold for removing components.
-    img_label : ndarray, optional
-        Array containing image components. Must have the same format as the array returned
-        by scipy.ndimage.label(...). Zero values are ignored.
-    structure : ndarray, optional
-        Structuring element used for detecting connected components.
+    If `img_label` is not None, the provided labels are used as components.
+
+    Args:
+        img_bin: Binary image.
+        tam_threshold: Minimum component size in pixels. Components smaller than this
+            value are removed.
+        img_label: Pre-computed label array. Must have the same format as the array
+            returned by `scipy.ndimage.label`. Zero values are ignored.
+        structure: Structuring element used for detecting connected components.
 
     Returns:
-    -------
-    img_bin_final : ndarray
         Binary image with small components removed.
     """
 
@@ -156,30 +162,24 @@ def remove_small_comp(img_bin, tam_threshold=20, img_label=None, structure=None)
 
     return img_bin_final
 
-def ips_edges_to_img(ips, edges, img_shape, node_color=(255, 0, 0), edge_color=(0, 0, 255), out_img=None):
-    """Draw interest points and edges in an image. `ips` and `edges` are used in the network creation
-    module.
+def ips_edges_to_img(
+        ips, edges, img_shape, node_color=(255, 0, 0), edge_color=(0, 0, 255), out_img=None):
+    """Draws interest points and edges into an image array.
 
-    Parameters
-    ---------
-    ips : list of InterestPoint
-        Bifurcations and terminations identified in an image.
-    edges : list of tuple
-        Edge list containing blood vessel segments. Each element is a tuple (node1, node2, path), where
-        path contains the pixels of the segment.
-    img_shape : tuple of int
-        Image size to draw the network.
-    node_color : tuple of int, optional
-        Color to use for the interest points.
-    edge_color : tuple of int, optional
-        Color to use for the edges.
-    out_img : ndarray, optional
-        If provided, the image is drawn on this array.
+    `ips` and `edges` are used in the network creation module.
+
+    Args:
+        ips: Bifurcations and terminations identified in an image.
+        edges: Edge list containing blood vessel segments. Each element is a tuple
+            (node1, node2, path), where path contains the pixels of the segment.
+        img_shape: Shape of the output image.
+        node_color: RGB color for the interest points.
+        edge_color: RGB color for the edges.
+        out_img: If provided, the graph is drawn onto this array. Otherwise a new
+            array is created.
 
     Returns:
-    -------
-    out_img : ndarray
-        The image drawn.
+        Image array with the drawn interest points and edges.
     """
 
     if out_img is None:
@@ -195,29 +195,31 @@ def ips_edges_to_img(ips, edges, img_shape, node_color=(255, 0, 0), edge_color=(
 
     return out_img
 
-def graph_to_img(graph, img_shape=None, node_color=(255, 0, 0), node_pixels_color=(255, 255, 255),
-                 edge_color=(0, 0, 255), out_img=None):
-    """Draw networkx graph in an image.
+def graph_to_img(
+        graph: nx.Graph,
+        img_shape: tuple[int, ...] | None = None,
+        node_color: tuple[int, int, int] = (255, 0, 0),
+        node_pixels_color: tuple[int, int, int] = (255, 255, 255),
+        edge_color: tuple[int, int, int] = (0, 0, 255),
+        out_img: np.ndarray | None = None,
+        ) -> np.ndarray:
+    """Draws a NetworkX graph into an image array.
 
-    Parameters
-    ---------
-    graph : networkx.Graph
-        Graph containing node and edge positions.
-    img_shape : tuple of int, optional
-        Image size to draw the network.
-    node_color : tuple of int, optional
-        Color to use for the center position of a node.
-    node_pixels_color : tuple of int, optional
-        Color to use for pixels associated with a node.
-    edge_color : tuple of int, optional
-        Color to use for the edges.
-    out_img : ndarray, optional
-        If provided, the image is drawn on this array.
+    Requires nodes to have 'pixels' attributes and edges to have 'path' attributes.
+    Optionally uses 'center' node attributes for the node center color.
+
+    Args:
+        graph: Graph whose nodes contain 'pixels' and optionally 'center' attributes,
+            and whose edges contain a 'path' attribute.
+        img_shape: Shape of the output image. If None, uses `graph.graph['shape']`.
+        node_color: RGB color for the center pixel of each node.
+        node_pixels_color: RGB color for all non-center pixels of each node.
+        edge_color: RGB color for the edge path pixels.
+        out_img: If provided, the graph is drawn onto this array. Otherwise a new
+            array is created.
 
     Returns:
-    -------
-    out_img : ndarray
-        The image drawn.
+        Image array with the graph drawn onto it.
     """
 
     if img_shape is None:
@@ -226,13 +228,13 @@ def graph_to_img(graph, img_shape=None, node_color=(255, 0, 0), node_pixels_colo
     if out_img is None:
         out_img = np.zeros((*img_shape, 3), dtype=np.uint8)
 
-    for node, pixels in graph.nodes(data="pixels"):
+    for _, pixels in graph.nodes(data="pixels"):
         for pixel in pixels:
             out_img[tuple(pixel)] = node_pixels_color
 
     has_center = all("center" in graph.nodes[n] for n in graph.nodes)
     if has_center:
-        for node, center in graph.nodes(data="center"):
+        for _, center in graph.nodes(data="center"):
             out_img[tuple(center)] = node_color
 
     for _, _, path in graph.edges(data="path"):
@@ -245,29 +247,30 @@ def gaussian_filter_with_anchors(
     y: np.ndarray, 
     anchor_indices: list, 
     sigma: float = 1.0, 
-    correction_sigma: float = None
+    correction_sigma: float | None = None
 ) -> np.ndarray:
-    """
-    Smooths a 1D signal to remove discretization artifacts using a Gaussian filter,
-    while strictly preserving the exact value at anchor_indices using a blending window.
-    
+    """Smooths a 1D signal while preserving exact values at specified anchor indices.
+
+    Applies a Gaussian filter to reduce discretization artifacts, then uses a localized
+    Gaussian blending window at each anchor index to restore the original value.
+
     Args:
-        y: 1D numpy array containing the signal.
-        anchor_indices: The list of integer indices that must remain unchanged.
-        sigma: The standard deviation of the main Gaussian smoothing kernel.
-               For discretization, 1.0 to 2.0 is usually ideal.
-        correction_sigma: The width of the blending window for the anchor correction.
-                          If None, it defaults to the same value as `sigma`.
-                          
+        y: 1D array containing the signal to smooth.
+        anchor_indices: Integer indices whose values must remain unchanged after smoothing.
+        sigma: Standard deviation of the Gaussian smoothing kernel. Values between 1.0
+            and 2.0 are typically suitable for discretization artifacts.
+        correction_sigma: Width of the blending window for anchor correction. Defaults to
+            the same value as `sigma` if None.
+
     Returns:
-        A 1D numpy array of the smoothed, anchored signal.
+        Smoothed signal array of the same shape as `y`, with anchor values preserved.
     """
     if correction_sigma is None:
         correction_sigma = sigma
 
     # Apply uniform Gaussian smoothing to the entire array.
     # mode='nearest' prevents the endpoints from dipping toward zero.
-    y_smooth = gaussian_filter1d(y, sigma=sigma, mode='nearest')
+    y_smooth = gaussian_filter1d(y, sigma=sigma, mode="nearest")
 
     indices = np.arange(len(y))
     

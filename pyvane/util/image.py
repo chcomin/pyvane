@@ -1,49 +1,40 @@
 """Image class used for storing image data."""
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import scipy.ndimage as ndi
 
 
 class Image:
-    """Class representing a 2D or 3D image. The pixel data is saved in attribute `data`. The class
-    also contains some basic methods for changing the range and type of the values.
+    """Class representing a 2D or 3D image. The pixel data is saved in attribute `data`.
 
-    The image can be initialized with a disk location path. This information is used only as
-    metadata.
+    The image can be initialized with a disk location path. This information is used only
+    as metadata.
 
     Attributes:
-    data : ndarray
-        Matrix/tensor containing the pixel values.
-    path : str
-        The location in the system of the image file.
-    pix_size : tuple of float
-        The physical size of the pixels or voxels.
-    filename : str
-        The name of the file corresponding to the image.
-    ndim : int
-        The dimension of the image
-    shape : tuple of int
-        The size of each image axis.
-    or_vmin : Union[int, float]
-        The minimum image intensity when the image is first initialized. Does not change after
-        transformations.
-    or_vmax : Union[int, float]
-        The maximum image intensity when the image is first initialized. Does not change after
-        transformations.
+        data: Matrix/tensor containing the pixel values.
+        path: The location in the system of the image file.
+        pix_size: The physical size of the pixels or voxels.
+        filename: The stem of the file name corresponding to the image.
+        ndim: The number of dimensions of the image.
+        shape: The size of each image axis.
     """
 
     def __init__(
             self, 
             data: np.ndarray, 
             path: str | Path | None = None, 
-            pix_size: tuple[float, ...] | None = None
+            pix_size: tuple[float, ...] | np.ndarray | None = None
             ):
-        """Args:
-        data: A numpy array containing the pixel values. Can be 2D or 3D.
-        path: The location in the system of the image file.
-        pix_size: The physical size of the pixels or voxels.
+        """Initializes the Image.
+
+        Args:
+            data: Array containing the pixel values. Can be 2D or 3D.
+            path: The location in the system of the image file.
+            pix_size: The physical size of the pixels or voxels. If None, defaults to
+                unit size in all dimensions.
         """
 
         if not isinstance(data, np.ndarray):
@@ -64,25 +55,33 @@ class Image:
         self.pix_size = pix_size
         self.filename = filename
 
-    def get_range(self):
-        """Get minimum and maximum intensities as a tuple."""
+    def get_range(self) -> tuple[Any, Any]:
+        """Returns the minimum and maximum pixel intensities.
+
+        Returns:
+            A tuple (min_value, max_value).
+        """
 
         return self.data.min(), self.data.max()
 
-    def copy(self):
-        """Copy the image to a new image. Attributes `or_vmax` and `or_vmin` are also copied
-        from the original image.
+    def copy(self) -> "Image":
+        """Creates a copy of the image.
 
         Returns:
-        -------
-        img : Image
-            The new image.
+            A new Image instance with the same data, path, and pixel size.
         """
 
         return Image(self.data, self.path, self.pix_size)
 
-    def to_isotropic(self):
-        """Return a new image with isotropic pixel size. """
+    def to_isotropic(self) -> "Image":
+        """Returns a new image resampled to have isotropic pixel size.
+
+        The image is zoomed along each axis so that all pixel dimensions become equal
+        to the minimum pixel size of the original image.
+
+        Returns:
+            A new Image with isotropic voxel spacing.
+        """
 
         pix_size = self.pix_size
         zoom_ratio = pix_size/np.min(pix_size)
@@ -91,13 +90,12 @@ class Image:
         return Image(new_data, self.path, new_pix_size)
 
 
-    def get_info(self):
-        """Return string containing information about the image.
+    def get_info(self) -> str:
+        """Returns a string containing information about the image.
 
         Returns:
-        -------
-        repr_str : str
-            String containing information about the image.
+            A formatted string with the image shape, dtype, value range, pixel size,
+            and file path.
         """
 
         data = self.data
@@ -110,17 +108,17 @@ class Image:
 
         return repr_str
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.get_info() + self.data.__repr__()
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.get_info() + self.data.__str__()
     
-    def __array__(self, dtype=None, copy=None):
+    def __array__(self, dtype: np.typing.DTypeLike = None, copy: bool | None = None) -> np.ndarray:
         return self.data.__array__(dtype, copy)
 
-    def __getitem__(self, index):
+    def __getitem__(self, index: Any) -> Any:
         return self.data[index]
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(self.data, name)

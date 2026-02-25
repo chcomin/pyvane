@@ -4,26 +4,30 @@ import networkx as nx
 import numpy as np
 
 
-def parametric_line_fit(path):
-    """Fit a straight line to the points in `path`. The returned value is an array containing
-    points along the fitted line. Note that the points are equally spaced along `path`.
+def avg_func(x):
+    """Average function."""
 
-    Parameters
-    ----------
-    path : list of tuple
-        List containing points in the path.
+    return sum(x)/len(x)
+
+def parametric_line_fit(path):
+    """Fits a straight line to the points in ``path`` using arc-length parameterisation.
+
+    Returns equally-spaced (along the original path) points projected onto the
+    best-fit straight line.
+
+    Args:
+        path: List of coordinate tuples representing the path.
 
     Returns:
-    -------
-    fitted_coord : ndarray
-        Points along the fitted line. The size of the array is the same as the input list `path`.
+        List of 1D arrays, one per spatial coordinate axis, each with the same length
+        as ``path``, containing the fitted line coordinates.
     """
 
     path = np.array(path)
 
     dpath = np.diff(path, axis=0)
     dlength = np.sqrt(np.sum(dpath**2, axis=1))
-    s = np.array([0] + (np.cumsum(dlength)/sum(dlength)).tolist())
+    s = np.array([0, *(np.cumsum(dlength)/sum(dlength)).tolist()])
 
     fitted_coord = []
     for coord in path.T:
@@ -33,45 +37,40 @@ def parametric_line_fit(path):
     return fitted_coord
 
 def point_path_dist(point, path):
-    """Calculate all distances between a point and a path.
+    """Computes the Euclidean distance from a single point to every point in a path.
 
-    Parameters
-    ----------
-    point : tuple of float
-        A point.
-    path : list of tuple
-        List containing points in the path.
+    Args:
+        point: A single coordinate tuple.
+        path: Array of shape (N, D) containing path coordinates.
 
     Returns:
-    -------
-    float
-        The requested distances.
+        Array of length N with the distance from ``point`` to each path point.
     """
 
     return np.sqrt(np.sum((path-point)**2, axis=1))
 
 def vector_norm(vector):
-    """The norm of a vector."""
+    """Computes the Euclidean norm of a vector.
+
+    Args:
+        vector: The input vector.
+
+    Returns:
+        The Euclidean norm as a float.
+    """
 
     return np.sqrt(np.sum(vector**2))
 
 def points_line_dist(points, v1, v2):
-    """Calculate the smallest distance for each point in `points` to the line
-    defined by the points `v1` and `v2`.
+    """Computes the perpendicular distance from each point to a line defined by two points.
 
-    Parameters
-    ----------
-    points : list of tuple
-        A set of points.
-    v1 : tuple
-        The first point of a line.
-    v2 : tuple
-        The second point of a line.
+    Args:
+        points: Single coordinate tuple or array of shape (N, D).
+        v1: First point defining the line.
+        v2: Second point defining the line.
 
     Returns:
-    -------
-    distances : ndarray
-        The requested distances.
+        Array of perpendicular distances, one per input point.
     """
 
     points, v1, v2 = np.array(points), np.array(v1), np.array(v2)
@@ -99,58 +98,40 @@ def points_line_dist(points, v1, v2):
     return distances
 
 def find_path_segment(path, pixel_index, radius):
-    """Find the segment in `path` in which all points are a distance smaller than or equal
-    to `radius` to the point in `path` defined by `pixel_index`. This is used for extracting
-    the segment around a given point in the path for calculating the tortuosity.
+    """Extracts the segment of ``path`` within ``radius`` of a reference pixel.
 
-    Parameters
-    ----------
-    path : list of tuple
-        List containing points in the path.
-    pixel_index : int
-        The index of the point in `path` that will be used for extracting the segment.
-    radius : float
-        The radius used for extracting the segment.
+    Args:
+        path: List of coordinate tuples representing the path.
+        pixel_index: Index of the reference pixel in ``path``.
+        radius: Maximum distance from the reference pixel to include.
 
     Returns:
-    -------
-    edge_segment : ndarray
-        The extracted segment.
+        Array containing the extracted path segment.
     """
 
     path = np.array(path)
     pixel = path[pixel_index]
 
     dist = point_path_dist(pixel, path)
-    ind_left, is_left_border = find_left_path_segment_idx(path, pixel_index, radius, dist)
-    ind_right, is_right_border = find_right_path_segment_idx(path, pixel_index, radius, dist)
+    ind_left, _ = find_left_path_segment_idx(path, pixel_index, radius, dist)
+    ind_right, _ = find_right_path_segment_idx(path, pixel_index, radius, dist)
 
     edge_segment = path[ind_left:ind_right]
 
     return edge_segment
 
 def find_left_path_segment_idx(path, pixel_index, radius, dist=None):
-    """Auxiliary function for `find_path_segment`. Find the starting index of the
-    segment that will be extracted from the path.
+    """Finds the starting index of the path segment centred on ``pixel_index``.
 
-    Parameters
-    ----------
-    path : list of tuple
-        List containing points in the path.
-    pixel_index : int
-        The index of the point in `path` that will be used for extracting the segment.
-    radius : float
-        The radius used for extracting the segment.
-    dist : float, optional
-        The distances between the point defined by `pixel_index` and each point in `path`.
-        It is calculated if not provided.
+    Args:
+        path: List of coordinate tuples.
+        pixel_index: Index of the reference pixel in ``path``.
+        radius: Maximum distance from the reference pixel to include.
+        dist: Optional precomputed distances from the reference pixel to all path points.
 
     Returns:
-    -------
-    ind_left : int
-        Starting index of the segment to be extracted.
-    is_left_border : bool
-        If True, indicates that the segment begins at the first point of `path`.
+        A tuple (ind_left, is_left_border). ``ind_left`` is the starting index of the
+        segment. ``is_left_border`` is True when the segment starts at the first pixel.
     """
 
     if dist is None:
@@ -170,28 +151,18 @@ def find_left_path_segment_idx(path, pixel_index, radius, dist=None):
     return ind_left, is_left_border
 
 def find_right_path_segment_idx(path, pixel_index, radius, dist=None):
-    """Auxiliary function for `find_path_segment`. Find the last index of the
-    segment that will be extracted from the path.
+    """Finds the ending index of the path segment centred on ``pixel_index``.
 
-    Parameters
-    ----------
-    path : list of tuple
-        List containing points in the path.
-    pixel_index : int
-        The index of the point in `path` that will be used for extracting the segment.
-    radius : float
-        The radius used for extracting the segment.
-    dist : float, optional
-        The distances between the point defined by `pixel_index` and each point in `path`.
-        It is calculated if not provided.
+    Args:
+        path: List of coordinate tuples.
+        pixel_index: Index of the reference pixel in ``path``.
+        radius: Maximum distance from the reference pixel to include.
+        dist: Optional precomputed distances from the reference pixel to all path points.
 
     Returns:
-    -------
-    ind_right : int
-        Last index +1 of the segment to be extracted. Thus, the index can be used for
-        slicing the `path` (e.g., path[:ind_right]).
-    is_right_border : bool
-        If True, indicates that the segment ends at the last point of `path`.
+        A tuple (ind_right, is_right_border). ``ind_right`` is one past the last segment
+        index (suitable for slicing). ``is_right_border`` is True when the segment ends
+        at the last pixel.
     """
 
     num_pixels = len(path)
@@ -211,31 +182,22 @@ def find_right_path_segment_idx(path, pixel_index, radius, dist=None):
     return ind_right+1, is_right_border
 
 def tortuosity_path_pixel(path, scale, return_valid=True):
-    """Calculate the tortuosity of each point in `path`.
+    """Calculates the local tortuosity at each pixel of a path.
 
-    Parameters
-    ----------
-    path : list of tuple
-        List containing points in the path.
-    scale : float
-        The scale at which the tortuosity will be calculated. That is, smaller values indicate
-        that the tortuosity should be calculated for local changes in direction of the blood vessels,
-        while larger values indicate that small changes should be ignored and only large variations
-        should be taken into account.
-    return_valid : bool
-        If True, regions close to terminations and bifurcations of blood vessels are not considered
-        in the calculation. This ignored region becomes larger with the `scale` parameter.
+    Args:
+        path: List of coordinate tuples representing the path.
+        scale: Scale at which tortuosity is evaluated (segment radius = scale / 2).
+        return_valid: If True, pixels near path endpoints that cannot form a full
+            neighbourhood are excluded.
 
     Returns:
-    -------
-    path_tortuosity : list of float
-        The tortuosity around each point in `path`.
-    left_border_index : int
-        If `return_valid` is True, contains the index of the first point for which the tortuosity
-        was calculated.
-    right_border_index : int
-        If `return_valid` is True, contains the index of the last point for which the tortuosity
-        was calculated.
+        A tuple (path_tortuosity, left_border_index, right_border_index).
+        ``path_tortuosity`` is a list of per-pixel tortuosity values.
+        ``left_border_index`` and ``right_border_index`` mark the extent of the valid
+        region when ``return_valid`` is True.
+
+    Raises:
+        ValueError: If the path has fewer than 2 points or ``scale`` is less than 2.
     """
 
     if len(path)<2 or scale<2:
@@ -244,8 +206,6 @@ def tortuosity_path_pixel(path, scale, return_valid=True):
     num_pixels = len(path)
     left_border_index = num_pixels
     right_border_index = 0
-    found_left_border = False
-    found_right_border = False
 
     radius = scale/2
     idx_first_pixel, _ = find_right_path_segment_idx(path, 0, radius)
@@ -260,7 +220,6 @@ def tortuosity_path_pixel(path, scale, return_valid=True):
 
     path_tortuosity = []
     for pixel_index in range(idx_first_pixel, idx_last_pixel):
-        pixel = path[pixel_index]
 
         path_segment = find_path_segment(path, pixel_index, scale/2)
 
@@ -281,32 +240,21 @@ def tortuosity_path_pixel(path, scale, return_valid=True):
     return path_tortuosity, left_border_index, right_border_index
 
 def tortuosity_path(path, scale, reduction_function=None, use_valid=True):
-    """Calculate the tortuosity of a path.
+    """Calculates the tortuosity of a path by aggregating pixel-level values.
 
-    Parameters
-    ----------
-    path : list of tuple
-        List containing points in the path.
-    scale : float
-        The scale at which the tortuosity will be calculated. That is, smaller values indicate
-        that the tortuosity should be calculated for local changes in direction of the blood vessels,
-        while larger values indicate that small changes should be ignored and only large variations
-        should be taken into account.
-    reduction_function : func
-        Function to use for reducing the tortuosity calculated for each point in `path` into a single
-        value. For instance, it can be an average or median function.
-    use_valid : bool
-        If True, regions close to terminations and bifurcations of blood vessels are not considered
-        in the calculation. This ignored region becomes larger with the `scale` parameter.
+    Args:
+        path: List of coordinate tuples.
+        scale: Scale at which tortuosity is evaluated.
+        reduction_function: Function to reduce per-pixel tortuosity to a scalar (e.g.,
+            mean). Defaults to the simple average.
+        use_valid: If True, excludes pixels near path endpoints from the calculation.
 
     Returns:
-    -------
-    path_tort
-        The tortuosity of the path.
+        Scalar tortuosity value, or None if no valid pixels are available.
     """
 
     if reduction_function is None:
-        reduction_function = lambda x: sum(x)/len(x)   # Average
+        reduction_function = avg_func
 
     pixelwise_tortuority, _, _ = tortuosity_path_pixel(path, scale, return_valid=use_valid)
     if len(pixelwise_tortuority)==0:
@@ -318,41 +266,25 @@ def tortuosity_path(path, scale, reduction_function=None, use_valid=True):
 
 def tortuosity(graph, scale, length_threshold, graph_reduction_func=None, path_reduction_func=None,
                pix_size=(1., 1., 1.), use_valid=True):
-    """Calculate the tortuosity of the blood vessels represented by `graph`.
+    """Calculates the mean tortuosity of blood vessels represented by the graph.
 
-    Parameters
-    ----------
-    graph : networkx.MultiGraph
-        The input graph.
-    scale : float
-        The scale at which the tortuosity will be calculated. That is, smaller values indicate
-        that the tortuosity should be calculated for local changes in direction of the blood vessels,
-        while larger values indicate that small changes should be ignored and only large variations
-        should be taken into account.
-    length_threshold : float
-        Edges smaller than `length_threshold` will not be included in the calculation. Note that
-        `length_threshold` is given in physical units. Also, for compatibility purposes, the length
-        of the edges are calculated using the number of points representing the edge instead of the
-        arc length. If the edges are represented by adjacent pixels, this should not be a problem.
-    graph_reduction_func :
-        Function to use for reducing the tortuosity calculated for each edge into a single value.
-        For instance, it can be an average or median function.
-    path_reduction_func :
-        Function to use for reducing the tortuosity calculated for each point in an edge into a
-        single value.
-    pix_size : tuple of float
-        The physical size of the pixels in the image where the graph was generated.
-    use_valid : bool
-        If True, regions close to terminations and bifurcations of blood vessels are not considered
-        in the calculation. This ignored region becomes larger with the `scale` parameter.
+    Args:
+        graph: The input graph. Edges must have a ``path`` attribute.
+        scale: Scale at which tortuosity is evaluated. Smaller values capture fine local
+            curvature; larger values reflect only broad directional changes.
+        length_threshold: Edges shorter than this value (in physical units) are skipped.
+            Edge length is approximated by the number of path points.
+        graph_reduction_func: Function to aggregate per-edge tortuosity into a single
+            result. Defaults to the simple average.
+        path_reduction_func: Function to aggregate per-pixel tortuosity within an edge.
+            Defaults to the simple average.
+        pix_size: Physical size of the pixels per dimension.
+        use_valid: If True, path regions near terminations are excluded.
 
     Returns:
-    -------
-    float
-        A single value quantifying the tortuosity of the blood vessels.
+        Scalar mean tortuosity across all qualifying edges.
     """
 
-    avg_func = lambda x: sum(x)/len(x)   # Average
     if graph_reduction_func is None:
         graph_reduction_func = avg_func
     if path_reduction_func is None:
@@ -364,7 +296,8 @@ def tortuosity(graph, scale, length_threshold, graph_reduction_func=None, path_r
     for path in paths:
         if len(path)>(length_threshold/avg_func(pix_size)):
             path = np.array(path)*pix_size
-            tort_val = tortuosity_path(path, scale, reduction_function=path_reduction_func, use_valid=use_valid)
+            tort_val = tortuosity_path(
+                path, scale, reduction_function=path_reduction_func, use_valid=use_valid)
             if tort_val is not None:
                 tortuosities.append(tort_val)
 

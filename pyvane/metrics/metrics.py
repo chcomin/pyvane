@@ -4,27 +4,52 @@ import networkx as nx
 import numpy as np
 import scipy.ndimage as ndi
 
-from pyvane.graph.util import get_euclidean_trim_indices
 from pyvane.metrics.tortuosity import tortuosity as tort_func
 from pyvane.util.misc import gaussian_filter_with_anchors
 
 
-def path_length(path, pix_size, img_roi=None):
-    """Calculate the arc-length of a parametric sequence of pixels.
+def avg_func(x):
+    """Average function."""
+    return sum(x)/len(x)
 
-    Parameters
-    ----------
-    path : list of tuple
-        A sequence of pixels representing a path/curve.
-    pix_size : tuple of float
-        The physical size that a pixel represents, can be a different value for each axis.
-    img_roi : ndarray
-        A region of interest image. Only paths where `img_roi` has value 1 will be considered.
+def _get_pix_size(
+        graph: nx.MultiGraph, 
+        img_shape: tuple | np.ndarray, 
+        pix_size: tuple | np.ndarray | None = None
+        ) -> np.ndarray:
+    """Determines the pixel size to be used for metric calculations.
+
+    Args:
+        graph: The input graph. Used to access the graph's ``pix_size`` attribute if
+            ``pix_size`` is not provided.
+        img_shape: Size of the image per dimension. Used for validating the length of
+            ``pix_size`` if provided.
+        pix_size: Optional physical size of each pixel per dimension. If None, the graph's
+            ``pix_size`` attribute is used if available; otherwise, a default of ones is
+            used.
 
     Returns:
-    -------
-    path_length : float
-        The total length of the path.
+        Numpy array containing the pixel size per dimension.
+    """
+
+    pix_size = pix_size if pix_size is not None else graph.graph.get("pix_size", None)
+    if pix_size is None:
+        pix_size = np.ones(len(img_shape), dtype=float)
+    pix_size = np.array(pix_size)
+
+    return pix_size
+
+def path_length(path, pix_size, img_roi=None):
+    """Calculates the arc-length of a parametric sequence of pixels.
+
+    Args:
+        path: Sequence of coordinate tuples representing a path or curve.
+        pix_size: Physical size per pixel, one value per axis.
+        img_roi: Optional region-of-interest mask. Only path segments where the mask
+            equals 1 are included in the total.
+
+    Returns:
+        Total arc-length of the path.
     """
 
     dpath = np.diff(path, axis=0)*pix_size
@@ -39,69 +64,52 @@ def path_length(path, pix_size, img_roi=None):
     return path_length
 
 def xy_roi_to_volume(img_roi, num_planes):
-    """Convert 2D image to 3D by copying the same image `num_planes` times.
+    """Converts a 2D image to 3D by tiling it ``num_planes`` times along axis 0.
 
-    Parameters
-    ----------
-    img_roi : ndarray
-        Image to be copied.
-    num_planes : int
-        Size of the first dimension of the output image.
+    Args:
+        img_roi: 2D image to tile.
+        num_planes: Number of repetitions along the first axis.
 
     Returns:
-    -------
-    ndarray
-        A 3D image.
+        3D array of shape (num_planes, H, W).
     """
 
     return np.tile(img_roi, (num_planes, 1, 1))
 
 def labeled_roi(img_roi):
-    """Return label image containing connected components in `img_roi`.
+    """Returns a label image of connected components in ``img_roi``.
 
-    Parameters
-    ----------
-    img_roi : ndarray
-        Image containing only values 0 and 1. This usually represents regions of interest
-        to be quantified.
+    If the maximum value of ``img_roi`` equals 1, connected components are labelled
+    using a full connectivity structure. Otherwise, ``img_roi`` is returned unchanged.
+
+    Args:
+        img_roi: Binary image with values 0 and 1.
 
     Returns:
-    -------
-    img_roi : ndarray
-        The labeled image.
+        Label image where each connected component has a unique integer ID.
     """
 
     if img_roi.max()==1:
-        img_roi, num_comps = ndi.label(img_roi, np.ones((3,)*img_roi.ndim))
+        img_roi, _ = ndi.label(img_roi, np.ones((3,)*img_roi.ndim))
 
     return img_roi
 
 def measure_rois(graph, img_roi, mea_funcs, to_volume=False, scale_factor=1):
-    """Apply a set of measurement functions defined in `mea_funcs` to characterize
-    a graph. The characterization can be done at different regions of interest defined
-    in the mask image `img_roi`.
+    """Applies measurement functions to characterise the graph within each region of interest.
 
-    Parameters
-    ----------
-    graph : networkx.MultiGraph
-        The graph to be quantified.
-    img_roi : ndarray
-        Binary image containing regions of interest for quantification.
-    mea_funcs : list of func
-        Functions for characterizing the graph. Must have signature func(graph,
-        img_roi, scale_factor).
-    to_volume : bool
-        If False, `img_roi` is used as is. Note that if the graph represents a 3D
-        system and `img_roi` is 2D, an error will occur. If True, the 2D ROI is tranformed
-        into a 3D image by copying the same image as many times as necessary.
-    scale_factor : float
-        Conversion constant that can be used for returning the measurement at a specific
-        physical scale (m, cm, mm, um, etc).
+    Args:
+        graph: The graph to quantify.
+        img_roi: Binary image containing regions of interest for quantification.
+        mea_funcs: List of functions with signature ``func(graph, img_roi, scale_factor)``
+            used to characterise the graph.
+        to_volume: If False, ``img_roi`` is used as-is. If True, a 2D ROI is promoted to
+            3D by replicating it to match the graph's first-axis size.
+        scale_factor: Conversion constant for returning measurements at a specific physical
+            scale (m, cm, mm, um, etc).
 
     Returns:
-    -------
-    measured_values : list of float
-        The calculated values.
+        Dictionary mapping each connected-component index to a list of measured values,
+        one per function in ``mea_funcs``.
     """
 
     img_roi = labeled_roi(img_roi)
@@ -111,7 +119,7 @@ def measure_rois(graph, img_roi, mea_funcs, to_volume=False, scale_factor=1):
 
     structure = np.ones(img_roi.ndim*(3,))
 
-    img_label, num_comps = ndi.label(img_roi, structure)      # Connected components
+    img_label, _ = ndi.label(img_roi, structure)      # Connected components
     comp_indices = np.unique(img_label)[1:]
 
     measured_values = {}
@@ -130,25 +138,17 @@ def img_volume(
         img_roi: np.ndarray | None = None, 
         scale_factor: float = 1.0
         ):
-    """Calculate the volume of an image considering the physical size of the
-    pixels and possible regions of interest.
+    """Calculates the physical volume of an image or a region of interest.
 
-    Parameters
-    ----------
-    pix_size : tuple of float
-        The physical size of the pixels at each dimension.
-    img_shape : tuple of int
-        Size of the image at each dimension.
-    img_roi : ndarray
-        Binary image containing a region of interest.
-    scale_factor : float
-        Conversion constant that can be used for returning the measurement at a specific
-        physical scale (m, cm, mm, um, etc).
+    Args:
+        pix_size: Physical size of each pixel per dimension.
+        img_shape: Number of pixels per dimension.
+        img_roi: Optional binary mask. If provided, only pixels where the mask equals 1
+            are counted.
+        scale_factor: Conversion constant for the desired physical unit.
 
     Returns:
-    -------
-    volume : float
-        The volume of the image or region of interest.
+        Volume in physical units.
     """
 
     pix_size = np.array(pix_size)
@@ -162,21 +162,15 @@ def img_volume(
     return volume
 
 def total_length(graph, pix_size, img_roi=None):
-    """Calculate the total length of the edges in the graph. The graph must contain
-    attribute 'pix_size' (the physical size of the pixels) and its edges must contain
-    attribute 'path' (the path represented by each edge).
+    """Calculates the total arc-length of all edges in the graph.
 
-    Parameters
-    ----------
-    graph : networkx.MultiGraph
-        The input graph.
-    img_roi : ndarray
-        Binary array. Only edges where `img_roi` has value 1 will be used in the calculation.
+    Args:
+        graph: The input graph. Edges must have a ``path`` attribute.
+        pix_size: Physical size of each pixel per dimension.
+        img_roi: Optional binary mask. Only path segments inside the mask are counted.
 
     Returns:
-    -------
-    total_length : float
-        The total length.
+        Total arc-length summed over all edges.
     """
 
     paths = nx.get_edge_attributes(graph, "path").values()
@@ -187,20 +181,15 @@ def total_length(graph, pix_size, img_roi=None):
     return total_length
 
 def num_branch_points(graph, img_roi=None):
-    """Calculate the number of branching points of the graph. Nodes in the graph must
-    contain attribute 'center'.
+    """Counts the number of branching points (nodes with degree >= 3) in the graph.
 
-    Parameters
-    ----------
-    graph : networkx.MultiGraph
-        The input graph.
-    img_roi : ndarray
-        Binary array. Only edges where `img_roi` has value 1 will be used in the calculation.
+    Args:
+        graph: The input graph. Nodes must have a ``center`` attribute.
+        img_roi: Optional binary mask. Only nodes whose centre lies inside the mask
+            are counted.
 
     Returns:
-    -------
-    int
-        The number of branching points.
+        Number of branching points.
     """
 
     degrees = dict(graph.degree())
@@ -223,30 +212,25 @@ def vessel_density(
         img_roi: np.ndarray | None = None, 
         scale_factor: float = 1.0
         ):
-    """Calculate the density of blood vessels inside an image represented by `graph`.
-    The density is given by the total length of the vessels divided by the image volume.
+    """Calculates blood vessel density as total vessel length divided by image volume.
 
-    Parameters
-    ----------
-    graph : networkx.MultiGraph
-        The input graph.
-    img_shape : tuple of int
-        The size of the image.
-    img_roi : ndarray
-        Binary array. Only blood vessels where `img_roi` has value 1 will be used in the calculation.
-    scale_factor : float
-        Conversion constant that can be used for returning the measurement at a specific
-        physical scale (m, cm, mm, um, etc).
+    Args:
+        graph: The input graph.
+        img_shape: Size of the image per dimension.
+        pix_size: Physical size of each pixel per dimension. Defaults to the graph's
+            ``pix_size`` attribute, or ones if not set.
+        img_roi: Optional binary mask. Only vessels inside the mask are included.
+        scale_factor: Conversion constant for the desired physical unit.
 
     Returns:
-    -------
-    density : float
-        The blood vessel density in the image.
+        Blood vessel density (length / volume).
+
+    Raises:
+        ValueError: If ``pix_size`` length does not match ``img_shape``, or if
+            ``img_roi`` shape does not match ``img_shape``.
     """
 
-    pix_size = pix_size if pix_size is not None else graph.graph.get("pix_size", None)
-    if pix_size is None:
-        pix_size = np.ones(len(img_shape), dtype=float)
+    pix_size = _get_pix_size(graph, img_shape, pix_size)
 
     if len(pix_size) != len(img_shape):
         raise ValueError("The length of pix_size must match the length of img_shape.")
@@ -267,30 +251,25 @@ def branch_point_density(
         img_roi: np.ndarray | None = None, 
         scale_factor: float = 1.0
         ):
-    """Calculate the density of blood vessels branching points inside an image represented by `graph`.
-    The density is given by the number of branching points divided by the image volume.
+    """Calculates the density of branching points as count divided by image volume.
 
-    Parameters
-    ----------
-    graph : networkx.MultiGraph
-        The input graph.
-    img_shape : tuple of int
-        The size of the image.
-    img_roi : ndarray
-        Binary array. Only blood vessels where `img_roi` has value 1 will be used in the calculation.
-    scale_factor : float
-        Conversion constant that can be used for returning the measurement at a specific
-        physical scale (m, cm, mm, um, etc).
+    Args:
+        graph: The input graph.
+        img_shape: Size of the image per dimension.
+        pix_size: Physical size of each pixel per dimension. Defaults to the graph's
+            ``pix_size`` attribute, or ones if not set.
+        img_roi: Optional binary mask. Only branching points inside the mask are counted.
+        scale_factor: Conversion constant for the desired physical unit.
 
     Returns:
-    -------
-    bp_density : float
-        The branching point density in the image.
+        Branching-point density (count / volume).
+
+    Raises:
+        ValueError: If ``pix_size`` length does not match ``img_shape``, or if
+            ``img_roi`` shape does not match ``img_shape``.
     """
 
-    pix_size = pix_size if pix_size is not None else graph.graph.get("pix_size", None)
-    if pix_size is None:
-        pix_size = np.ones(len(img_shape), dtype=float)
+    pix_size = _get_pix_size(graph, img_shape, pix_size)
 
     if len(pix_size) != len(img_shape):
         raise ValueError("The length of pix_size must match the length of img_shape.")
@@ -304,29 +283,39 @@ def branch_point_density(
 
     return bp_density
 
-def assign_edge_radius(graph, bin_img):
+def assign_edge_radius(graph, bin_img, pix_size: tuple | np.ndarray | None = None):
+    """Calculates and assigns radius statistics to every edge in the graph.
+
+    Computes the Euclidean distance transform of ``bin_img``, then for each edge samples
+    mean, min, and max radius values from the outer path (excluding pixels inside junction
+    spheres). Also assigns the outer edge length.
+
+    Args:
+        graph: The graph to annotate in-place. Edges must have ``path`` and
+            ``trim_amount`` attributes; nodes must have a ``radius`` attribute.
+        bin_img: Binary foreground mask used to compute the distance transform.
+        pix_size: Physical size of each pixel per dimension. Defaults to the graph's
+            ``pix_size`` attribute, or ones if not set.
     """
-    Calculates physiological metrics for every edge.
-    Volumes are extracted from the 3D watershed partition.
-    Radii are strictly sampled from the 1D centerline to prevent underestimation.
-    """
+
+    pix_size = np.mean(_get_pix_size(graph, bin_img.shape, pix_size))
 
     edt_bg = ndi.distance_transform_edt(bin_img)
     
-    for u, v, key, data in graph.edges(keys=True, data=True):
+    for u, v, key, _ in graph.edges(keys=True, data=True):
         
         # Isolate the Outer Path for Radii and Length calculations
-        path = graph[u][v][key]['path']
+        path = graph[u][v][key]["path"]
         path_len = len(path)
         
         # Enforce min -> max ordering to align with the path array
         node_s, node_e = (u, v) if u < v else (v, u)
         
         # Radii of junctions (0 if not a junction)
-        r_s = graph.nodes[node_s]['radius'] if graph.degree(node_s) > 2 else 0.0
-        r_e = graph.nodes[node_e]['radius'] if graph.degree(node_e) > 2 else 0.0
+        r_s = graph.nodes[node_s]["radius"] if graph.degree(node_s) > 2 else 0.0
+        r_e = graph.nodes[node_e]["radius"] if graph.degree(node_e) > 2 else 0.0
 
-        trim_s, trim_e = graph[u][v][key]['trim_amount']
+        trim_s, trim_e = graph[u][v][key]["trim_amount"]
         
         # Calculate Radii from the Centerline ONLY
         if trim_s + trim_e >= path_len:
@@ -345,31 +334,57 @@ def assign_edge_radius(graph, bin_img):
             outer_min = float(np.min(edt_vals))
             outer_max = float(np.max(edt_vals))
             
-        graph[u][v][key]['mean_radius'] = outer_mean
-        graph[u][v][key]['max_radius'] = outer_max
-        graph[u][v][key]['min_radius'] = outer_min
+        graph[u][v][key]["mean_radius"] = outer_mean*pix_size
+        graph[u][v][key]["max_radius"] = outer_max*pix_size
+        graph[u][v][key]["min_radius"] = outer_min*pix_size
         
         # Calculate True Outer Length
-        full_length = graph[u][v][key]['length']
+        full_length = graph[u][v][key]["length"]
         outer_length = max(0.0, float(full_length - r_s - r_e))
-        graph[u][v][key]['outer_length'] = outer_length
-        
+        graph[u][v][key]["outer_length"] = outer_length 
 
-def assign_centerline_radii(graph, bin_img, smooth_sigma=1.0):
+def assign_centerline_radii(
+        graph, 
+        bin_img=None, 
+        edt_bg=None, 
+        smooth_sigma=1.0, 
+        pix_size: tuple | np.ndarray | None = None
+        ):
+    """Extracts and assigns a smoothed 1D radius array to each edge's centerline.
+
+    Samples the Euclidean distance transform at every path pixel, corrects junction
+    inflation by clamping internal segments, and applies a Gaussian filter with anchor
+    points to reduce staircase artefacts.
+
+    Args:
+        graph: The graph to annotate in-place. Edges must have ``path`` and
+            ``trim_amount`` attributes.
+        bin_img: Binary foreground mask. Used to compute the EDT when ``edt_bg`` is
+            not provided.
+        edt_bg: Precomputed Euclidean distance transform. Takes precedence over
+            ``bin_img`` when provided.
+        smooth_sigma: Standard deviation for the 1D Gaussian smoothing filter.
+        pix_size: Physical size of each pixel per dimension. Defaults to the graph's
+            ``pix_size`` attribute, or ones if not set.
+
+    Raises:
+        ValueError: If neither ``bin_img`` nor ``edt_bg`` is provided.
     """
-    Extracts, corrects, and assigns a 1D array of radii to the centerline pixels.
-    Fixes junction inflation by clamping internal segments, and fixes grid 
-    staircasing using a fast 1D Gaussian filter.
-    """
 
-    edt_bg = ndi.distance_transform_edt(bin_img)
+    if bin_img is None and edt_bg is None:
+        raise ValueError("Either bin_img or edt_bg must be provided.")
 
-    for u, v, _, data in graph.edges(keys=True, data=True):
-        path = data['path']
+    if edt_bg is None:
+        edt_bg = ndi.distance_transform_edt(bin_img)
+
+    pix_size = np.mean(_get_pix_size(graph, edt_bg.shape, pix_size))
+
+    for _, _, _, data in graph.edges(keys=True, data=True):
+        path = data["path"]
         path_len = len(path)
         
         if path_len == 0:
-            data['radii'] = np.array([], dtype=np.float32)
+            data["radii"] = np.array([], dtype=np.float32)
             continue
             
         # Direct EDT Sampling
@@ -377,10 +392,12 @@ def assign_centerline_radii(graph, bin_img, smooth_sigma=1.0):
         radii = edt_bg[tuple(path.T)].astype(np.float32)
         
         # Junction Inflation Correction (The Clamping Strategy)
-        trim_s, trim_e = data['trim_amount']
+        trim_s, trim_e = data["trim_amount"]
 
         # Define anchor points that must remain unchanged during smoothing
-        anchors = [trim_s, path_len - trim_e - 1]
+        anchors = []
+        if trim_s + trim_e < path_len:
+            anchors.extend([trim_s, path_len - trim_e - 1])
         if trim_s > 0:
             anchors.append(0)
         if trim_e > 0:
@@ -389,7 +406,7 @@ def assign_centerline_radii(graph, bin_img, smooth_sigma=1.0):
         radii_s = gaussian_filter_with_anchors(radii, anchors, sigma=smooth_sigma)
             
         # Assign to the edge
-        data['radii'] = radii_s
+        data["radii"] = radii_s*pix_size
 
 def tortuosity(
         graph: nx.MultiGraph, 
@@ -397,34 +414,24 @@ def tortuosity(
         pix_size: tuple | np.ndarray | None = None,
         use_valid: bool = True
         ):
-    """Calculate the tortuosity of the blood vessels represented by `graph`.
+    """Calculates the mean tortuosity of blood vessels in the graph.
 
-    Parameters
-    ----------
-    graph : networkx.MultiGraph
-        The input graph.
-    scale : float
-        The scale at which the tortuosity will be calculated. That is, smaller values indicate
-        that the tortuosity should be calculated for local changes in direction of the blood vessels,
-        while larger values indicate that small changes should be ignored and only large variations
-        should be taken into account.
-    use_valid : bool
-        If True, regions close to terminations and bifurcations of blood vessels are not considered
-        in the calculation. This ignored region becomes larger with the `scale` parameter.
+    Args:
+        graph: The input graph. Edges must have a ``path`` attribute.
+        scale: Length scale for tortuosity computation. Smaller values capture fine
+            local curvature; larger values reflect only broad directional changes.
+        pix_size: Physical size of each pixel per dimension. Defaults to the graph's
+            ``pix_size`` attribute, or ones if not set.
+        use_valid: If True, path regions near terminations and bifurcations are
+            excluded from the calculation.
 
     Returns:
-    -------
-    float
-        The tortuosity of the blood vessels.
+        Mean tortuosity across all sufficiently long edges.
     """
 
-    pix_size = pix_size if pix_size is not None else graph.graph.get("pix_size", None)
-    if pix_size is None:
-        pix_size = np.ones(len(graph.graph["img_shape"]), dtype=float)
+    pix_size = _get_pix_size(graph, graph.graph["img_shape"], pix_size)
 
     length_threshold = scale/2**0.5
-    def f(x): return sum(x)/len(x)
-    avg_func = f
 
     return tort_func(graph, scale, length_threshold, graph_reduction_func=avg_func, 
                      path_reduction_func=avg_func,

@@ -13,28 +13,22 @@ except Exception:
     print("Could not load skeleton library. Unable to calculate skeletons.")
 
 def skeletonize(img_bin, num_threads=1, verbosity=0):
-    """Generate the skeleton of binary image `img_bin` using the method published in [1]. The
-    input image can be 2D or 3D.
+    """Generates the skeleton of a binary image using the Palàgyi-Kuba algorithm.
 
-    Parameters
-    ----------
-    img_bin : Image
-        Binary image. Must have only values 0 and 1.
-    num_threads : int
-        Number of threads to use for calculating the skeleton.
-    verbosity : int
-        Verbosity level of the method. If 0, nothing is printed. If 1, the current iteration
-        index is printed. If larger than 1, saves an image with name temp.tif containing the
-        current skeleton each `verbosity` iterations. In some systems and terminals the values
-        might not be printed.
+    Supports 2D and 3D images. See reference [1] for algorithmic details.
+
+    Args:
+        img_bin: Binary Image object with values 0 and 1.
+        num_threads: Number of threads for skeleton computation.
+        verbosity: Verbosity level. 0 = silent; 1 = prints iteration index; values > 1
+            save an intermediate skeleton image every ``verbosity`` iterations.
 
     Returns:
-    -------
-    img_res : Image
-        A binary image containing the skeleton.
+        Binary Image object containing the skeleton.
 
-    [1] Palàgyi, K. and Kuba, A. (1998). A 3D 6-subiteration thinning algorithm for
-    extracting medial lines. Pattern Recognition Letters 19, 613–627.
+    References:
+        [1] Palàgyi, K. and Kuba, A. (1998). A 3D 6-subiteration thinning algorithm
+        for extracting medial lines. Pattern Recognition Letters 19, 613-627.
     """
 
     if tuple(img_bin.unique()) != (0, 1):
