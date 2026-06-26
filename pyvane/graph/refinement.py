@@ -513,7 +513,9 @@ def collapse_internal_bridges(
         cand_bridge_edges = []
         for u, v, key, data in graph.edges(keys=True, data=True):
             if u != v and graph.degree(u) > 2 and graph.degree(v) > 2:
-                cand_bridge_edges.append((u, v, key, data))
+                 # Exclude bridges where v has a self-loop and bridges with multiple edges.
+                 if not graph.has_edge(v, v) and graph.number_of_edges(u, v) == 1:
+                    cand_bridge_edges.append((u, v, key, data))
 
         for u, v, key, data in cand_bridge_edges:    
             if u not in graph or v not in graph:
@@ -558,7 +560,7 @@ def collapse_internal_bridges(
                             else:
                                 c_new_3d = new_center.astype(np.int32)
                                 
-                            # Orient path so it flows v -> neighbor
+                            # Orient path so it flows ref_node -> neighbor
                             ordered_path = path if ref_node < neighbor else path[::-1]
                             
                             if len(ordered_path) > 0:
@@ -578,6 +580,7 @@ def collapse_internal_bridges(
                                 if len(segment) > 0: 
                                     arrays_to_stack.append(segment)
                                 arrays_to_stack.append(ordered_path)
+
                                 new_path = np.vstack(arrays_to_stack)
                             else:
                                 new_path = path
