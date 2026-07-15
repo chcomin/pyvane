@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use PyVaNe, please cite it as below."
+authors:
+- family-names: "Freitas-Andrade"
+  given-names: "Moises"
+- family-names: "Comin"
+  given-names: "Cesar H"
+- family-names: "da Silva"
+  given-names: "Matheus Viana"
+- family-names: "da F Costa"
+  given-names: "Luciano"
+- family-names: "Lacoste"
+  given-names: "Baptiste"
+title: "Unbiased analysis of mouse brain endothelial networks from two-or three-dimensional fluorescence images"
+version: 1.0.0
+date-released: 2026-07-15
+doi: 10.1117/1.NPh.9.3.031916

@@ -1,5 +1,7 @@
 # Python Vascular Network Analysis
 
+[![DOI](https://img.shields.io/badge/DOI-10.1117%2F1.NPh.9.3.031916-blue)](https://doi.org/10.1117/1.NPh.9.3.031916)
+
 ![Example](assets/video.gif)
 
 **Py**thon  **Va**scular **Ne**twork Analysis (PyVaNe) is a framework for analysing blood vessel digital images. This includes the segmentation, representation and characterization of blood vessels. The framework identifies 2D and 3D vascular systems and represent them using graphs. The graphs describe the **topology** of the blood vessels, that is, bifurcations and terminations are represented as nodes and two nodes are connected if there is a blood vessel segment between them.
@@ -56,10 +58,29 @@ Functions inside [metrics](pyvane/metrics) implement some basic blood vessel mea
 * scikit-image (0.22.0)
 * python-igraph (0.11.4) - optional
 
-**Warning, the Palágyi-Kuba skeletonization function only work on Linux.**
+### Citation & Paper
+
+Our paper is available [here](https://doi.org/10.1117/1.NPh.9.3.031916).
+
+Here is the full citation in BibTeX format:
+
+```bibtex
+@article{freitas2022unbiased,
+  title={Unbiased analysis of mouse brain endothelial networks from two-or three-dimensional fluorescence images},
+  author={Freitas-Andrade, Moises and Comin, Cesar H and da Silva, Matheus Viana and Costa, Luciano da F and Lacoste, Baptiste},
+  journal={Neurophotonics},
+  volume={9},
+  number={3},
+  pages={031916--031916},
+  year={2022},
+  doi={10.1117/1.NPh.9.3.031916}
+}
+```
+
 
 PyVaNe has been used in the following publications:
 
+* Viana da Silva, M., de Carvalho Santos, N., Ouellette, J., Lacoste, B., & Comin, C. H. (2025). A new dataset for measuring the performance of blood vessel segmentation methods under distribution shifts. Plos one, 20(5), e0322048.
 * Ouellette, J., Warsi, S., Romero, P., Khare, P., Naz, S., Aubert-Tandon, L., Pileggi, C., Yandiev, S., Freitas-Andrade, M., Comin, C.H. and Harper, M.E., 2025. Purinergic receptor activation rectifies autism-associated endothelial dysfunction. **Journal of Cerebral Blood Flow and Metabolism**, p. 262-262.
 * Freitas-Andrade, M., Comin, C.H., Van Dyken, P., Ouellette, J., Raman-Nair, J., Blakeley, N., Liu, Q.Y., Leclerc, S., Pan, Y., Liu, Z. and Carrier, M., 2023. Astroglial Hmgb1 regulates postnatal astrocyte morphogenesis and cerebrovascular maturation. **Nature Communications**, 14(1), p.4965.
 * Lithopoulos, M.A., Toussay, X., Zhong, S., Xu, L., Mustafa, S.B., Ouellette, J., Freitas-Andrade, M., Comin, C.H., Bassam, H.A., Baker, A.N. and Sun, Y., 2022. Neonatal hyperoxia in mice triggers long-term cognitive deficits via impairments in cerebrovascular function and neurogenesis. **The Journal of Clinical Investigation**, 132(22).
@@ -71,3 +92,4 @@ PyVaNe has been used in the following publications:
 * Gouveia, Ayden, Matthew Seegobin, Timal S. Kannangara, Ling He, Fredric Wondisford, Cesar H. Comin, Luciano da F. Costa et al. "The aPKC-CBP pathway regulates post-stroke neurovascular remodeling and functional recovery." **Stem cell reports** 9, no. 6 (2017): 1735-1744.
 * Kur, Esther, Jiha Kim, Aleksandra Tata, Cesar H. Comin, Kyle I. Harrington, Luciano da F Costa, Katie Bentley, and Chenghua Gu. "Temporal modulation of collective cell behavior controls vascular network topology." **Elife** 5 (2016): e13212.
 * Lacoste, Baptiste, Cesar H. Comin, Ayal Ben-Zvi, Pascal S. Kaeser, Xiaoyin Xu, Luciano da F. Costa, and Chenghua Gu. "Sensory-related neural activity regulates the structure of vascular networks in the cerebral cortex." **Neuron** 83, no. 5 (2014): 1117-1130.
+
