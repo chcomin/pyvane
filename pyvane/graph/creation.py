@@ -491,6 +491,12 @@ def map_foreground_to_graph(
         foreground voxel a partition ID. ``id_cl_map`` maps label IDs to edge and
         centerline-index data. ``id_node_map`` maps label IDs to node identifiers.
     """
+
+    # TODO: id_cl_map has more ids than marker_volume because there are graph paths passing on the 
+    # same pixels. This means that some pixels in id_cl_map do not have a marker in marker_volume. 
+    # Need to verify that this is a problem for the downstream processing.
+    # TODO: marker_volume has more ids than labeled_volume because the watershed algorithm removes
+    # some ids. Need to verify that this is a problem for the downstream processing.
     marker_volume = np.zeros_like(bin_img, dtype=np.int32)
     
     id_node_map = {}
