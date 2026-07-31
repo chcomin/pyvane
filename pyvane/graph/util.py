@@ -403,7 +403,10 @@ def construct_attribute_volume(
         raise ValueError("edge_attr must be specified if id_edge_map or id_cl_map is provided.")
     
     # Build a lookup table up to the max ID found in the volume
-    max_id = labeled_volume.max()
+    max_id = max(
+        max(id_map) for id_map in [id_node_map, id_edge_map, id_cl_map] if id_map is not None
+        )
+    
     lookup = np.zeros(max_id + 1, dtype=np.float32)
 
     # Set Background to NaN
