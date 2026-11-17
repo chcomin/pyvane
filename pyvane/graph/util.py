@@ -141,15 +141,23 @@ def _compute_arc_length_numba(
 def compute_arc_length(path: np.ndarray, u: int, v: int, graph: nx.MultiGraph) -> float:
     """Computes the arc-length of an edge, bridging the gaps to node centers.
 
+    Edge paths are stored from the node with the smaller index to the node with the larger
+    index. The nodes are therefore ordered here, so that the result does not depend on the
+    order in which ``u`` and ``v`` are given.
+
     Args:
-        path: Array of shape (N, D) of the edge's path pixel coordinates.
-        u: Source node identifier.
-        v: Target node identifier.
+        path: Array of shape (N, D) of the edge's path pixel coordinates, oriented from
+            ``min(u, v)`` to ``max(u, v)``.
+        u: One endpoint of the edge.
+        v: The other endpoint of the edge.
         graph: Graph containing node attributes; nodes must have a ``center`` attribute.
 
     Returns:
         Total arc-length of the edge as a float.
     """
+
+    if u > v:
+        u, v = v, u
 
     center_u = np.array(graph.nodes[u]["center"], dtype=np.int32)
     center_v = np.array(graph.nodes[v]["center"], dtype=np.int32)
@@ -164,6 +172,51 @@ def calculate_edge_lengths(graph: nx.MultiGraph) -> None:
     """
     for u, v, key, data in graph.edges(keys=True, data=True):
         graph[u][v][key]["length"] = compute_arc_length(data["path"], u, v, graph)
+
+def find_inconsistent_edges(
+        graph: nx.MultiGraph, length_tol: float = 1e-4) -> list[tuple[tuple, str]]:
+    """Checks that every edge follows the path and length conventions of pyvane.
+
+    The conventions are: the ``path`` of an edge excludes the node centers and runs from the
+    node of smaller index to the node of larger index; consecutive path voxels, and each path
+    end and its node center, are adjacent (Chebyshev distance <= 1); ``length`` is the arc
+    length from one center, along the path, to the other center.
+
+    Args:
+        graph: Graph whose nodes have ``center`` and whose edges have ``path`` and
+            ``length`` attributes.
+        length_tol: Tolerance for the comparison between the stored and the recomputed
+            length.
+
+    Returns:
+        A list of ((u, v, key), message) for the edges that break a convention. Empty if the
+        graph is consistent.
+    """
+    problems = []
+    for u, v, key, data in graph.edges(keys=True, data=True):
+        a, b = min(u, v), max(u, v)
+        path = np.asarray(data["path"])
+        c_a = np.asarray(graph.nodes[a]["center"])
+        c_b = np.asarray(graph.nodes[b]["center"])
+        edge = (a, b, key)
+
+        if len(path) > 0:
+            if np.abs(path[0] - c_a).max() > 1:
+                problems.append((edge, "path start is not adjacent to center of min node"))
+            if np.abs(path[-1] - c_b).max() > 1:
+                problems.append((edge, "path end is not adjacent to center of max node"))
+            if len(path) > 1 and np.abs(np.diff(path, axis=0)).max() > 1:
+                problems.append((edge, "path is not connected"))
+        elif np.abs(c_a - c_b).max() > 1:
+            problems.append((edge, "empty path between non-adjacent centers"))
+
+        if "length" in data:
+            expected = compute_arc_length(path.reshape(-1, len(c_a)), a, b, graph)
+            if abs(data["length"] - expected) > length_tol:
+                problems.append(
+                    (edge, f"stored length {data['length']:.4f} != arc length {expected:.4f}"))
+
+    return problems
 
 @njit
 def get_euclidean_trim_indices(

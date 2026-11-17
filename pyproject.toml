@@ -10,3 +10,7 @@ readme = "readme.md"
 
 [tool.setuptools]
 packages = ["pyvane"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

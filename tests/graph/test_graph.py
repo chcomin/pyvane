@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import networkx as nx
 import numpy as np
 from PIL import Image
@@ -46,7 +48,7 @@ def test_graph():
 
     length_threshold = 5.0
 
-    bin_img = np.array(Image.open("12749_segmented.png"))
+    bin_img = np.array(Image.open(Path(__file__).parent / "12749_segmented.png"))
     skel_img = lee.skeletonize(bin_img)
 
     init_graph = graph_from_skeleton(skel_img, keep_rings = False)

@@ -82,7 +82,7 @@ def remove_degree_two_nodes(graph: nx.MultiGraph, keep_rings: bool = True) -> bo
                 new_path = new_path[::-1]
 
             # Calculate the new accumulated length and add the edge
-            new_length = compute_arc_length(new_path, u, w, graph)
+            new_length = compute_arc_length(new_path, min(u, w), max(u, w), graph)
             graph.add_edge(
                 scalar(u), scalar(w), path=new_path.astype(np.int32), length=scalar(new_length))
 
@@ -478,6 +478,68 @@ def prune_branches(
                 
     return graph_changed, trash_paths
 
+def _bridge_from_center(
+        center: np.ndarray, ordered_path: np.ndarray, is_2d: bool) -> np.ndarray:
+    """Prepends to a path the voxels that join it to a node center.
+
+    The joining voxels are the Bresenham line from ``center`` to ``ordered_path[0]``,
+    excluding both of its endpoints, so that the result still excludes the node center.
+
+    Args:
+        center: Coordinates of the node center, of length 2 or 3.
+        ordered_path: Array of shape (N, D) oriented so that it starts next to the node.
+            Must not be empty.
+        is_2d: Whether the coordinates are 2D.
+
+    Returns:
+        Array of shape (M, D) with M >= N.
+    """
+    if is_2d:
+        c_3d = np.array([0, center[0], center[1]], dtype=np.int32)
+        p_3d = np.array([0, ordered_path[0][0], ordered_path[0][1]], dtype=np.int32)
+    else:
+        c_3d = np.asarray(center, dtype=np.int32)
+        p_3d = np.asarray(ordered_path[0], dtype=np.int32)
+
+    bridge = bresenham_3d(c_3d, p_3d)
+    if is_2d:
+        bridge = bridge[:, 1:]
+
+    segment = bridge[1:-1]
+    if len(segment) == 0:
+        return ordered_path
+    return np.vstack([segment, ordered_path])
+
+def _line_between_centers(
+        center_a: np.ndarray, center_b: np.ndarray, is_2d: bool) -> np.ndarray:
+    """Returns the voxels of the Bresenham line from ``center_a`` to ``center_b``, excluding
+    both centers. The result may be empty."""
+    if is_2d:
+        a_3d = np.array([0, center_a[0], center_a[1]], dtype=np.int32)
+        b_3d = np.array([0, center_b[0], center_b[1]], dtype=np.int32)
+    else:
+        a_3d = np.asarray(center_a, dtype=np.int32)
+        b_3d = np.asarray(center_b, dtype=np.int32)
+
+    line = bresenham_3d(a_3d, b_3d)[1:-1]
+    if is_2d:
+        line = line[:, 1:]
+    return line
+
+def _is_collapsible_bridge(graph: nx.MultiGraph, u: int, v: int) -> bool:
+    """Checks, on the current graph, whether the edge u-v is a candidate bridge.
+
+    Both nodes must exist and be branching nodes (degree > 2), they must be joined by exactly
+    one edge, and ``v`` must not have a self-loop.
+    """
+    if u == v or u not in graph or v not in graph:
+        return False
+    if graph.degree(u) <= 2 or graph.degree(v) <= 2:
+        return False
+    if graph.number_of_edges(u, v) != 1:
+        return False
+    return not graph.has_edge(v, v)
+
 def collapse_internal_bridges(
         graph: nx.MultiGraph, 
         edt_bg: np.ndarray, 
@@ -488,6 +550,12 @@ def collapse_internal_bridges(
     When two high-degree nodes are connected by an edge whose length is less than
     ``collapse_length_ratio_threshold`` times the sum of their radii, the edge is
     collapsed and the two nodes are merged into one. Iterates until stable.
+
+    A bridge u-v is only collapsed when u and v are joined by exactly one edge and v has no
+    self-loop. These conditions are checked on the current graph right before each
+    collapse, since earlier collapses in the same pass change the graph. When a bridge is
+    collapsed, u moves to the midpoint of u and v, all edges of u (including its self-loops)
+    are re-joined to the new center, and all edges of v are transferred to u.
 
     Args:
         graph: The graph to modify in-place.
@@ -510,102 +578,84 @@ def collapse_internal_bridges(
     while iteration_changed:
         iteration_changed = False
 
-        cand_bridge_edges = []
-        for u, v, key, data in graph.edges(keys=True, data=True):
-            if u != v and graph.degree(u) > 2 and graph.degree(v) > 2:
-                 # Exclude bridges where v has a self-loop and bridges with multiple edges.
-                 if not graph.has_edge(v, v) and graph.number_of_edges(u, v) == 1:
-                    cand_bridge_edges.append((u, v, key, data))
+        cand_bridge_edges = [
+            (u, v) for u, v in graph.edges() if _is_collapsible_bridge(graph, u, v)
+        ]
 
-        for u, v, key, data in cand_bridge_edges:    
-            if u not in graph or v not in graph:
-                continue # One of the nodes was removed in a previous iteration
-            if graph.degree(u) <= 2 or graph.degree(v) <= 2:
-                # This condition should never be true since a bridge removal only increases
-                # the degree of a node
-                raise ValueError(
-                    f"Inconsistent state for edge ({u}, {v}, {key}): degree(u)={graph.degree(u)}, "
-                    f"degree(v)={graph.degree(v)}"
-                    )
+        for u, v in cand_bridge_edges:
+            # Earlier collapses in this pass may have changed the graph.
+            if not _is_collapsible_bridge(graph, u, v):
+                continue
+
+            bridge_length = next(iter(graph[u][v].values()))["length"]
 
             # Get radii of the two branching nodes
             r_u = edt_bg[tuple(graph.nodes[u]["center"])]
             r_v = edt_bg[tuple(graph.nodes[v]["center"])]
             
             # Criterion: Junctions geometrically overlap into a single body
-            if data["length"] < (r_u + r_v) * collapse_length_ratio_threshold:
-                
-                # Compute new merged center for u
-                c_u = np.array(graph.nodes[u]["center"])
-                c_v = np.array(graph.nodes[v]["center"])
-                new_center = np.round((c_u + c_v) / 2.0).astype(np.int32)
-                graph.nodes[u]["center"] = new_center
-                
-                # Bridge the gaps and re-wire all edges attached to v, transferring them to u
-                for ref_node in [u, v]:
-                    for neighbor in list(graph.neighbors(ref_node)):
-                        if neighbor in (u, v):
-                            # Drop the internal bridge itself. Warning!! This also avoids 
-                            # transfering self-loops and multiedges between u and v. So, we 
-                            # consider that they are also artifacts.
-                            continue 
-                            
-                        for k, edge_data in list(graph[ref_node][neighbor].items()):
-                            path = edge_data["path"]
-                            
-                            # Prepare 3D coordinates for Numba Bresenham
-                            if is_2d:
-                                c_new_3d = np.array(
-                                    [0, new_center[0], new_center[1]], dtype=np.int32)
-                            else:
-                                c_new_3d = new_center.astype(np.int32)
-                                
+            if bridge_length >= (r_u + r_v) * collapse_length_ratio_threshold:
+                continue
+
+            # Compute new merged center for u
+            c_u = np.array(graph.nodes[u]["center"])
+            c_v = np.array(graph.nodes[v]["center"])
+            new_center = np.round((c_u + c_v) / 2.0).astype(np.int32)
+            graph.nodes[u]["center"] = new_center
+
+            # Re-join the self-loops of u to the new center, at both ends of the path.
+            self_loops = list(graph[u][u].items()) if graph.has_edge(u, u) else []
+            for loop_key, loop_data in self_loops:
+                path = loop_data["path"]
+                if len(path) > 0:
+                    path = _bridge_from_center(new_center, path, is_2d)
+                    path = _bridge_from_center(new_center, path[::-1], is_2d)[::-1]
+                graph.add_edge(
+                    u,
+                    u,
+                    key=loop_key,
+                    path=path.astype(np.int32),
+                    length=scalar(compute_arc_length(path, u, u, graph)),
+                )
+
+            # Re-join the edges of u and transfer the edges of v to u. The bridge u-v is
+            # dropped together with v. v has no self-loops (checked above).
+            for ref_node in (u, v):
+                for neighbor in list(graph.neighbors(ref_node)):
+                    if neighbor in (u, v):
+                        continue
+
+                    for edge_key, edge_data in list(graph[ref_node][neighbor].items()):
+                        path = edge_data["path"]
+
+                        if len(path) > 0:
                             # Orient path so it flows ref_node -> neighbor
                             ordered_path = path if ref_node < neighbor else path[::-1]
-                            
-                            if len(ordered_path) > 0:
-                                if is_2d:
-                                    p_start_3d = np.array(
-                                        [0, ordered_path[0][0], ordered_path[0][1]], dtype=np.int32)
-                                else:
-                                    p_start_3d = ordered_path[0].astype(np.int32)
-                                
-                                # Bridge the gap inside the junction
-                                bridge = bresenham_3d(c_new_3d, p_start_3d)
-                                if is_2d:
-                                    bridge = bridge[:, 1:]
-                                    
-                                segment = bridge[1:-1]
-                                arrays_to_stack = []
-                                if len(segment) > 0: 
-                                    arrays_to_stack.append(segment)
-                                arrays_to_stack.append(ordered_path)
-
-                                new_path = np.vstack(arrays_to_stack)
-                            else:
-                                new_path = path
-                                
-                            # Re-orient correctly to flow min(node) -> max(node)
+                            new_path = _bridge_from_center(new_center, ordered_path, is_2d)
+                            # Re-orient to flow min(node) -> max(node)
                             if u > neighbor:
                                 new_path = new_path[::-1]
-                                
-                            # Add the transferred edge to u
-                            new_length = compute_arc_length(new_path, u, neighbor, graph)
-                            key = None
-                            if ref_node == u:
-                                key = k
-                            graph.add_edge(
-                                u, 
-                                neighbor, 
-                                key=key, 
-                                path=new_path.astype(np.int32), 
-                                length=scalar(new_length)
-                                )
-                        
-                # 3. Delete v (automatically cleans up the old bridge and edges)
-                graph.remove_node(v)
-                graph_changed = True
-                iteration_changed = True
+                        else:
+                            # Direct node-to-node edge: join the two centers with a line.
+                            new_path = _line_between_centers(
+                                new_center, graph.nodes[neighbor]["center"], is_2d)
+                            if u > neighbor:
+                                new_path = new_path[::-1]
+
+                        new_length = compute_arc_length(new_path, u, neighbor, graph)
+                        # Edges of u keep their key; edges of v get a new one.
+                        graph.add_edge(
+                            u,
+                            neighbor,
+                            key=edge_key if ref_node == u else None,
+                            path=new_path.astype(np.int32),
+                            length=scalar(new_length),
+                        )
+
+            # Delete v (also removes the bridge and the original edges of v)
+            graph.remove_node(v)
+            graph_changed = True
+            iteration_changed = True
 
     return graph_changed
 
