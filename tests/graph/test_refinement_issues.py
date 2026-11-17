@@ -131,7 +131,7 @@ def test_collapse_internal_bridges_does_not_raise():
     edge 1-3 to node 0, so 0-2 becomes a triple edge. Then the candidate (0, 2), listed when it
     was a single edge, is collapsed: all three 0-2 edges are dropped as "internal", node 0 is
     left with degree 2, and the next candidate (0, 3) raises. Found by random testing (1 of
-    20000 random graphs); it happened on one real stack (Het(2), smoothing sigma 0.75).
+    20000 random graphs); it also happened on real data.
     Besides the crash, dropping all the edges between u and v discards the parallel edges
     (real loops) that were transferred from the merged node.
     """
