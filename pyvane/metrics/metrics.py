@@ -1,11 +1,28 @@
-"""Blood vessel morphometry analysis."""
+"""Blood vessel morphometry analysis.
+
+Edge geometry can be measured in two ways, which write the same edge
+attributes:
+- "voxel": the voxel path of the skeleton and the 3D distance transform
+  (``assign_edge_radius``, ``assign_centerline_radii``);
+- "smoothed": paths smoothed along their length, leaf tips extended to the label surface and
+  in-plane radii (``pyvane.metrics.smoothed``). Less biased for length, tortuosity and
+  radius, in particular in labels that the axial blur makes taller than wide.
+
+``measure_edges`` records the method in ``graph.graph["geometry"]``, and the graph metrics
+(``vessel_density``, ``tortuosity``) use the matching edge geometry unless told otherwise:
+the voxel ``path`` for "voxel" (and for graphs that were not measured), the smoothed
+``points`` for "smoothed".
+"""
 
 import networkx as nx
 import numpy as np
 import scipy.ndimage as ndi
 
+from pyvane.metrics import smoothed
 from pyvane.metrics.tortuosity import tortuosity as tort_func
 from pyvane.util.misc import gaussian_filter_with_anchors
+
+GEOMETRIES = ("voxel", "smoothed")
 
 
 def avg_func(x):
@@ -39,6 +56,20 @@ def _get_pix_size(
 
     return pix_size
 
+def _get_geometry(graph: nx.MultiGraph, geometry: str | None = None) -> str:
+    """The edge geometry to use: ``geometry`` if given, otherwise the one recorded by
+    ``measure_edges`` in ``graph.graph["geometry"]``, otherwise "voxel"."""
+
+    geometry = geometry if geometry is not None else graph.graph.get("geometry", "voxel")
+    if geometry not in GEOMETRIES:
+        raise ValueError(f'Unknown geometry "{geometry}"; use one of {GEOMETRIES}.')
+    return geometry
+
+def _edge_polyline_attr(geometry: str) -> str:
+    """Edge attribute holding the polyline of the given geometry."""
+
+    return "points" if geometry == "smoothed" else "path"
+
 def path_length(path, pix_size, img_roi=None):
     """Calculates the arc-length of a parametric sequence of pixels.
 
@@ -56,7 +87,9 @@ def path_length(path, pix_size, img_roi=None):
     dlengths = np.sqrt(np.sum(dpath**2, axis=1))
 
     if img_roi is not None:
-        is_inside_roi = img_roi[tuple(zip(*path))]==1
+        # Points with non-integer coordinates (smoothed paths) take their nearest voxel
+        voxels = np.round(np.asarray(path)).astype(int)
+        is_inside_roi = img_roi[tuple(voxels.T)]==1
         dlengths = dlengths[is_inside_roi[1:]]
 
     path_length = np.sum(dlengths)
@@ -161,19 +194,25 @@ def img_volume(
 
     return volume
 
-def total_length(graph, pix_size, img_roi=None):
+def total_length(graph, pix_size, img_roi=None, geometry: str | None = None):
     """Calculates the total arc-length of all edges in the graph.
 
     Args:
-        graph: The input graph. Edges must have a ``path`` attribute.
+        graph: The input graph. Edges must have a ``path`` attribute (and ``points`` for
+            the "smoothed" geometry).
         pix_size: Physical size of each pixel per dimension.
         img_roi: Optional binary mask. Only path segments inside the mask are counted.
+        geometry: "voxel" (edge ``path``) or "smoothed" (edge ``points``, see
+            ``measure_edges``). Defaults to ``graph.graph["geometry"]``, or "voxel".
 
     Returns:
         Total arc-length summed over all edges.
     """
 
-    paths = nx.get_edge_attributes(graph, "path").values()
+    attr = _edge_polyline_attr(_get_geometry(graph, geometry))
+    paths = nx.get_edge_attributes(graph, attr).values()
+    if len(paths) != graph.number_of_edges():
+        raise ValueError(f'Every edge needs a "{attr}" attribute; see measure_edges.')
     total_length = 0
     for path in paths:
         total_length += path_length(path, pix_size, img_roi)
@@ -182,6 +221,9 @@ def total_length(graph, pix_size, img_roi=None):
 
 def num_branch_points(graph, img_roi=None):
     """Counts the number of branching points (nodes with degree >= 3) in the graph.
+
+    Nodes flagged as probable crossings of two vessels (node attribute ``crossing``, set by
+    the "scaled" graph creation) are not branching points.
 
     Args:
         graph: The input graph. Nodes must have a ``center`` attribute.
@@ -193,7 +235,8 @@ def num_branch_points(graph, img_roi=None):
     """
 
     degrees = dict(graph.degree())
-    degree_three_nodes = list(filter(lambda item: item[1]>=3, degrees.items()))
+    degree_three_nodes = [(node, degree) for node, degree in degrees.items()
+                          if degree >= 3 and not graph.nodes[node].get("crossing", False)]
     if len(degree_three_nodes)==0:
         return 0
 
@@ -210,7 +253,8 @@ def vessel_density(
         img_shape: tuple | np.ndarray, 
         pix_size: tuple | np.ndarray | None = None, 
         img_roi: np.ndarray | None = None, 
-        scale_factor: float = 1.0
+        scale_factor: float = 1.0,
+        geometry: str | None = None,
         ):
     """Calculates blood vessel density as total vessel length divided by image volume.
 
@@ -221,6 +265,8 @@ def vessel_density(
             ``pix_size`` attribute, or ones if not set.
         img_roi: Optional binary mask. Only vessels inside the mask are included.
         scale_factor: Conversion constant for the desired physical unit.
+        geometry: Edge geometry for the length, "voxel" or "smoothed" (see
+            ``total_length``). Defaults to ``graph.graph["geometry"]``, or "voxel".
 
     Returns:
         Blood vessel density (length / volume).
@@ -238,7 +284,7 @@ def vessel_density(
     if img_roi is not None and img_roi.shape != img_shape:
         raise ValueError("The shape of img_roi must match the shape of img_shape.")
 
-    length = total_length(graph, pix_size, img_roi)*scale_factor
+    length = total_length(graph, pix_size, img_roi, geometry)*scale_factor
     volume = img_volume(pix_size, img_shape, img_roi, scale_factor)
     density = length/volume
 
@@ -412,18 +458,26 @@ def tortuosity(
         graph: nx.MultiGraph, 
         scale: float, 
         pix_size: tuple | np.ndarray | None = None,
-        use_valid: bool = True
+        use_valid: bool = True,
+        geometry: str | None = None,
         ):
     """Calculates the mean tortuosity of blood vessels in the graph.
 
+    This is a local tortuosity at the given scale, not the
+    per-edge ``tortuosity`` attribute (arc length / end-to-end distance) written by
+    ``measure_edges``.
+
     Args:
-        graph: The input graph. Edges must have a ``path`` attribute.
+        graph: The input graph. Edges must have a ``path`` attribute (and ``points`` for
+            the "smoothed" geometry).
         scale: Length scale for tortuosity computation. Smaller values capture fine
             local curvature; larger values reflect only broad directional changes.
         pix_size: Physical size of each pixel per dimension. Defaults to the graph's
             ``pix_size`` attribute, or ones if not set.
         use_valid: If True, path regions near terminations and bifurcations are
             excluded from the calculation.
+        geometry: Edge geometry, "voxel" (edge ``path``) or "smoothed" (edge ``points``).
+            Defaults to ``graph.graph["geometry"]``, or "voxel".
 
     Returns:
         Mean tortuosity across all sufficiently long edges.
@@ -435,4 +489,63 @@ def tortuosity(
 
     return tort_func(graph, scale, length_threshold, graph_reduction_func=avg_func, 
                      path_reduction_func=avg_func,
-                     pix_size=pix_size, use_valid=use_valid)
+                     pix_size=pix_size, use_valid=use_valid,
+                     path_attr=_edge_polyline_attr(_get_geometry(graph, geometry)))
+def measure_edges(
+        graph: nx.MultiGraph, 
+        bin_img: np.ndarray, 
+        method: str = "voxel", 
+        pix_size: tuple | np.ndarray | None = None,
+        smooth_sigma: float = 1.0,
+        ):
+    """Measures the geometry of every edge, in place, with the "voxel" or "smoothed" method.
+
+    Both methods write the same edge attributes, in physical units (for "voxel", radii use
+    the mean of ``pix_size``, as an isotropic image is assumed; for "smoothed", the in-plane
+    pixel size):
+    - ``mean_radius``, ``min_radius``, ``max_radius``: radius of the vessel away from the
+      junctions;
+    - ``radii``: radius at each voxel of the edge ``path``;
+    - ``points``: (n, 3) polyline of the vessel, in voxels, from the center of min(u, v) to
+      the center of max(u, v);
+    - ``measured_length``: arc length of ``points``;
+    - ``tortuosity``: ``measured_length`` / end-to-end distance (NaN for self-loops).
+
+    Methods:
+    - "voxel": radii from the 3D distance transform (``assign_edge_radius`` and
+      ``assign_centerline_radii``, which also writes ``outer_length``); ``points`` is the
+      voxel path with the node centers.
+    - "smoothed": radii from the in-plane distance transform (not inflated by the axial
+      blur); ``points`` is smoothed along the path, with leaf tips extended to the label
+      surface (``pyvane.metrics.smoothed``). Needs a 3D image.
+
+    The method is recorded in ``graph.graph["geometry"]``, which ``vessel_density`` and
+    ``tortuosity`` use by default.
+
+    Args:
+        graph: Graph from ``create_graph`` (either method).
+        bin_img: The binary image the graph was made from.
+        method: "voxel" or "smoothed".
+        pix_size: Physical size of each pixel per dimension. Defaults to the graph's
+            ``pix_size`` attribute, or ones if not set.
+        smooth_sigma: Smoothing of the "voxel" ``radii`` (see ``assign_centerline_radii``).
+    """
+
+    if method not in GEOMETRIES:
+        raise ValueError(f'Unknown method "{method}"; use one of {GEOMETRIES}.')
+    pix_size = _get_pix_size(graph, bin_img.shape, pix_size)
+
+    if method == "smoothed":
+        smoothed.measure_edges(graph, bin_img, pix_size=pix_size)
+    else:
+        assign_edge_radius(graph, bin_img, pix_size)
+        assign_centerline_radii(graph, bin_img, smooth_sigma=smooth_sigma, pix_size=pix_size)
+        for u, v, key, data in graph.edges(keys=True, data=True):
+            points = smoothed.edge_centerline(graph, u, v, key)
+            length = smoothed.path_length(points, pix_size)
+            end_to_end = smoothed.path_length(points[[0, -1]], pix_size)
+            data["points"] = points
+            data["measured_length"] = length
+            data["tortuosity"] = (length / end_to_end if u != v and end_to_end > 1e-9
+                                  else float("nan"))
+    graph.graph["geometry"] = method

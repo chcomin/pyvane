@@ -1,5 +1,7 @@
 """Functions for refining the graph topology by removing artifacts and simplifying structures."""
 
+from typing import Callable
+
 import networkx as nx
 import numpy as np
 from scipy.ndimage import distance_transform_edt
@@ -715,7 +717,9 @@ def refine_graph(
         collapse_length_ratio_threshold: float = 1.0,
         comp_size_threshold: int = 0, 
         comp_length_threshold: float = 1.0, 
-        keep_rings: bool = True
+        keep_rings: bool = True,
+        step_callback: Callable[[str, nx.MultiGraph, bool, list[np.ndarray]], None] | None = None,
+        edt_bg: np.ndarray | None = None,
         ) -> tuple[nx.MultiGraph, np.ndarray, list[np.ndarray]]:
     """Simplifies the graph topology iteratively until stable. 
     
@@ -769,6 +773,14 @@ def refine_graph(
         keep_rings: Whether to preserve pure ring structures (degree 2 nodes with a single 
             self-loop). Note that comp_*_threshold can also remove rings and have precedence over 
             this parameter.
+        step_callback: Optional function called after every step as
+            ``step_callback(step, graph, changed, trash_paths)``, where ``step`` is one of
+            "degree_two", "multi_edges", "self_loops", "false_anastomoses", "prune",
+            "collapse" and "components". It is meant for inspection and testing (e.g.
+            checking the graph with ``pyvane.graph.validate.check_graph``); it must not modify
+            the graph.
+        edt_bg: Optional precomputed ``distance_transform_edt(bin_img)``, to save its
+            computation when the same image is refined several times.
 
     References:
     [1] Drees, Dominik, et al. "Scalable robust graph and feature extraction for arbitrary vessel 
@@ -776,26 +788,35 @@ def refine_graph(
     """
     graph = condensed_graph.copy()
 
-    edt_bg: np.ndarray = distance_transform_edt(bin_img)
+    if edt_bg is None:
+        edt_bg = distance_transform_edt(bin_img)
     # Keep track of pixels from paths that are removed.
     global_trash_paths = []
+
+    def notify(step, changed, trash):
+        if step_callback is not None:
+            step_callback(step, graph, changed, trash)
 
     topology_changed = True
     while topology_changed:
         topology_changed = False
 
-        if remove_degree_two_nodes(graph, keep_rings = keep_rings):
+        changed = remove_degree_two_nodes(graph, keep_rings = keep_rings)
+        if changed:
             topology_changed = True
+        notify("degree_two", changed, [])
 
         changed, trash = resolve_multi_edges(graph, edt_bg, multi_edge_threshold)
         if changed:
             global_trash_paths.extend(trash)
             topology_changed = True
+        notify("multi_edges", changed, trash)
             
         changed, trash = resolve_self_loops(graph, edt_bg, self_loop_threshold)
         if changed:
             global_trash_paths.extend(trash)
             topology_changed = True
+        notify("self_loops", changed, trash)
 
         changed, trash = remove_false_anastomoses(
             graph, 
@@ -806,6 +827,7 @@ def refine_graph(
         if changed:
             global_trash_paths.extend(trash)
             topology_changed = True
+        notify("false_anastomoses", changed, trash)
 
         changed, trash = prune_branches(
             graph, 
@@ -818,15 +840,20 @@ def refine_graph(
         if changed:
             global_trash_paths.extend(trash)
             topology_changed = True
+        notify("prune", changed, trash)
 
-        if collapse_internal_bridges(
+        changed = collapse_internal_bridges(
             graph, 
             edt_bg, 
             collapse_length_ratio_threshold = collapse_length_ratio_threshold
-            ):
+            )
+        if changed:
             topology_changed = True
+        notify("collapse", changed, [])
 
+    n_before = graph.number_of_nodes()
     filter_components(graph, comp_size_threshold, comp_length_threshold)
+    notify("components", graph.number_of_nodes() != n_before, [])
 
     return graph, edt_bg, global_trash_paths
 

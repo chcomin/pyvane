@@ -586,9 +586,11 @@ def map_foreground_to_graph(
 def create_graph(
     skel_img: np.ndarray, 
     bin_img: np.ndarray, 
+    method: str = "refine",
     length_threshold: float = 5.0,
+    scaled_params: dict | None = None,
     keep_rings: bool = True, 
-    full_output: bool = False
+    full_output: bool = False,
     ) -> nx.MultiGraph | tuple[nx.MultiGraph, np.ndarray, list[np.ndarray]]:
     """Main function to create a graph from a skeleton image and its corresponding binary mask.
     
@@ -607,12 +609,30 @@ def create_graph(
     has many parameters, this function assumes some sane default values. If more controls is
     desired, the user can call the individual functions separately and pass in custom parameters.
 
+    Two methods are available for steps 2-3:
+    - ``"refine"`` (default): uses length thresholds to remove spurious edges. Please see
+      ``pyvane.graph.refinement.refine_graph`` for details on the refinement process. 
+    - ``"scaled"``: ``pyvane.graph.scaled``. Every decision (spurs, junctions, label holes,
+      crossings) is taken relative to the local vessel radius and to the label's elongation
+      along z, which suits labels that the axial blur makes taller than wide. Crossings are
+      kept as one node flagged ``crossing``. Only works for 3D images.
+
+    The scaled method is newer and has not been battle tested, but in our tests on synthetic 
+    data it led to much better graphs. In particular, it generates far fewer spurious branches 
+    and better junctions. 
+
+    In both cases, nodes get ``radius`` and edges ``trim_amount`` and ``outer_length`` attributes.
+    A ``graph.graph["method"]`` attribute records the method.
+
     Note: An isotropic image is assumed.
 
     Args:
         skel_img: 2D or 3D binary array representing the skeletonized image.
         bin_img: 2D or 3D binary array representing the original foreground mask.
+        method: "refine" or "scaled" (see above).
         length_threshold: Minimum length for edges, in voxels, to be retained during refinement.
+        scaled_params: Parameters of ``pyvane.graph.scaled.scaled_graph_from`` (e.g.
+            ``{"tunnel_width": 3.0}``) for ``method="scaled"``; use defaults if None.
         keep_rings: Whether to keep pure rings (isolated loops) in the graph.
         full_output: If True, also returns the Euclidean distance transform and the list
             of paths removed during refinement.
@@ -622,6 +642,16 @@ def create_graph(
         is True. ``edt_bg`` is the Euclidean distance transform of the background;
         ``trash_paths`` lists pixel coordinate arrays removed during refinement.
     """
+
+    if method == "scaled":
+        simple_graph, edt_bg, trash_paths = _create_scaled(
+            skel_img, bin_img, keep_rings, scaled_params)
+        assign_node_radii_and_outer_props(simple_graph, edt_bg)
+        return (simple_graph, edt_bg, trash_paths) if full_output else simple_graph
+    if method != "refine":
+        raise ValueError(f'Unknown method "{method}"; use "refine" or "scaled".')
+    if scaled_params is not None:
+        raise ValueError('scaled_params is only used with method="scaled".')
 
     # Create initial graph that represents all skeleton pixels as accurately as possible
     init_graph = graph_from_skeleton(skel_img, keep_rings = keep_rings)
@@ -648,18 +678,38 @@ def create_graph(
         )
 
     assign_node_radii_and_outer_props(simple_graph, edt_bg)
+    simple_graph.graph["method"] = "refine"
     
     if not full_output:
         return simple_graph
     
     return simple_graph, edt_bg, trash_paths
 
+def _create_scaled(
+    skel_img: np.ndarray, 
+    bin_img: np.ndarray, 
+    keep_rings: bool, 
+    scaled_params: dict | None
+    ) -> tuple[nx.MultiGraph, np.ndarray, list[np.ndarray]]:
+    """Graph, distance transform and removed paths of ``create_graph(method="scaled")``."""
+    # Imported here because pyvane.graph.scaled imports this module
+    from pyvane.graph.scaled import prepare_scaled, scaled_graph_from
+
+    prep = prepare_scaled(bin_img, skel_img=skel_img, keep_rings=keep_rings)
+    trash_paths = []
+    graph, _ = scaled_graph_from(prep, removed_paths=trash_paths, **(scaled_params or {}))
+    graph.graph["method"] = "scaled"
+    graph.graph["elongation"] = prep.elongation
+    return graph, prep.edt, trash_paths
+
 def create_graph_with_mapping(
     skel_img: np.ndarray, 
     bin_img: np.ndarray, 
+    method: str = "refine",
     length_threshold: float = 5.0,
+    scaled_params: dict | None = None,
     edges_only: bool = True,
-    keep_rings: bool = True, 
+    keep_rings: bool = True
     ) -> tuple[nx.MultiGraph, np.ndarray, dict] | tuple[nx.MultiGraph, np.ndarray, dict, dict]:
     """Creates a graph and also returns a mapping from the foreground pixels to the graph structure.
     
@@ -670,7 +720,9 @@ def create_graph_with_mapping(
     Args:
         skel_img: 2D or 3D binary array representing the skeletonized image.
         bin_img: 2D or 3D binary array representing the original foreground mask.
+        method: Graph creation method, "refine" or "scaled" (see `create_graph`).
         length_threshold: Minimum length for edges to be retained during refinement.
+        scaled_params: Parameters of the "scaled" method (see `create_graph`).
         edges_only: If True, pixels are only mapped to graph edges. If False, pixels are
             also mapped to junction nodes when they are closer to a junction than to an
             edge.
@@ -687,7 +739,9 @@ def create_graph_with_mapping(
     simple_graph, edt_bg, trash_paths = create_graph(
         skel_img = skel_img, 
         bin_img = bin_img,
+        method = method,
         length_threshold = length_threshold,
+        scaled_params = scaled_params,
         keep_rings = keep_rings, 
         full_output = True
     )

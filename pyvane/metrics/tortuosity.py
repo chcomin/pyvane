@@ -264,8 +264,22 @@ def tortuosity_path(path, scale, reduction_function=None, use_valid=True):
 
     return path_tort
 
+def resample_path(path, step=1.0):
+    """Points along a polyline every ``step`` (in its own units), with both ends kept.
+
+    The tortuosity at a scale assumes consecutive points about one pixel apart, as in voxel
+    paths; smoothed paths (``pyvane.metrics.smoothed``) can have longer steps.
+    """
+    path = np.asarray(path, float)
+    if len(path) < 2:
+        return path
+    arc = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(path, axis=0), axis=1))]
+    positions = np.r_[np.arange(0.0, arc[-1], step), arc[-1]]
+    return np.stack([np.interp(positions, arc, path[:, axis])
+                     for axis in range(path.shape[1])], axis=1)
+
 def tortuosity(graph, scale, length_threshold, graph_reduction_func=None, path_reduction_func=None,
-               pix_size=(1., 1., 1.), use_valid=True):
+               pix_size=(1., 1., 1.), use_valid=True, path_attr="path"):
     """Calculates the mean tortuosity of blood vessels represented by the graph.
 
     Args:
@@ -280,6 +294,8 @@ def tortuosity(graph, scale, length_threshold, graph_reduction_func=None, path_r
             Defaults to the simple average.
         pix_size: Physical size of the pixels per dimension.
         use_valid: If True, path regions near terminations are excluded.
+        path_attr: Edge attribute holding the path: "path", or "points" for smoothed paths
+            (resampled one pixel apart).
 
     Returns:
         Scalar mean tortuosity across all qualifying edges.
@@ -292,7 +308,9 @@ def tortuosity(graph, scale, length_threshold, graph_reduction_func=None, path_r
 
     pix_size = np.array(pix_size)
     tortuosities = []
-    paths = nx.get_edge_attributes(graph, "path").values()
+    paths = nx.get_edge_attributes(graph, path_attr).values()
+    if path_attr != "path":
+        paths = [resample_path(path) for path in paths]
     for path in paths:
         if len(path)>(length_threshold/avg_func(pix_size)):
             path = np.array(path)*pix_size
