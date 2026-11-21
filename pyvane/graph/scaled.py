@@ -73,7 +73,14 @@ from pyvane.graph.util import compute_arc_length
 from pyvane.skeletonization import lee
 
 DEFAULTS = {"spur_reach": "auto", "junction_reach": 2.0, "tunnel_width": 2.0,
-            "crossing_angle": 150.0, "z_mode": "add"}
+            "crossing_angle": 150.0}
+
+# Internal constants of scaled_graph_from: how the ellipsoids extend along z (see
+# _ellipsoid_axes), the margin added to every semi-axis (voxels) and the maximum number of
+# rounds of spur pruning and junction-region decisions
+Z_MODE = "add"
+MARGIN = 1.0
+MAX_ITER = 5
 
 def default_spur_reach(elongation: float) -> float:
     """``spur_reach`` for a label of this elongation: 1.25 + 0.2 x (elongation - 1), with the
@@ -532,22 +539,17 @@ def scaled_graph_from(prep: ScaledInput, spur_reach: float | str = DEFAULTS["spu
                       junction_reach: float = DEFAULTS["junction_reach"],
                       tunnel_width: float = DEFAULTS["tunnel_width"],
                       crossing_angle: float = DEFAULTS["crossing_angle"],
-                      z_mode: str = DEFAULTS["z_mode"], margin: float = 1.0,
-                      max_iter: int = 5,
                       removed_paths: list | None = None) -> tuple[nx.MultiGraph, dict]:
     """Simplifies a copy of ``prep.graph`` with the scaled-method decisions.
 
     Alternates ``prune_spurs`` and ``merge_junction_regions`` until nothing changes (at most
-    ``max_iter`` times).
+    ``MAX_ITER`` times), with the ellipsoid constants ``Z_MODE`` and ``MARGIN``.
 
     Args:
         prep: ``prepare_scaled`` output.
         spur_reach: A value, "auto" (``default_spur_reach`` of the label elongation) or
             "z_excess" (``choose_spur_reach``).
         junction_reach, tunnel_width, crossing_angle: See the module docstring.
-        z_mode: How the ellipsoids extend along z (see ``_ellipsoid_axes``).
-        margin: Added to every semi-axis (voxels).
-        max_iter: Maximum number of rounds.
         removed_paths: If a list, the paths of all removed edges are appended to it (for
             ``map_foreground_to_graph``).
 
@@ -559,16 +561,16 @@ def scaled_graph_from(prep: ScaledInput, spur_reach: float | str = DEFAULTS["spu
     elif spur_reach == "z_excess":
         reach, _ = choose_spur_reach(
             prep, junction_reach=junction_reach, tunnel_width=tunnel_width,
-            crossing_angle=crossing_angle, z_mode=z_mode, margin=margin, max_iter=max_iter)
+            crossing_angle=crossing_angle)
     else:
         reach = float(spur_reach)
     graph = copy.deepcopy(prep.graph)
     totals = {"spur_reach": float(reach), "spurs_pruned": 0}
-    for _ in range(max_iter):
-        n_pruned = prune_spurs(graph, prep, reach, margin, z_mode, prep.keep_rings,
+    for _ in range(MAX_ITER):
+        n_pruned = prune_spurs(graph, prep, reach, MARGIN, Z_MODE, prep.keep_rings,
                                removed_paths)
         counts = merge_junction_regions(graph, prep, junction_reach, reach, tunnel_width,
-                                        crossing_angle, margin, z_mode, removed_paths)
+                                        crossing_angle, MARGIN, Z_MODE, removed_paths)
         totals["spurs_pruned"] += n_pruned
         for name, count in counts.items():
             totals[name] = totals.get(name, 0) + count

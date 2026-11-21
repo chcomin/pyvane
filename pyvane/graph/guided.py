@@ -1,36 +1,38 @@
-"""Pruning of the spurs that the skeleton grows along z in axially elongated labels, guided by
-the graph of the label projected along z ("z-spur pruning").
+"""Pruning of spurious leaf branches, guided in 3D by the graph of the label projected along z.
 
-With a low axial resolution (widefield or confocal 10x), vessels in the label are several
-times taller than wide. The skeleton of such a cross-section is not a single centerline: it
-grows short branches towards the top and bottom of the vessel, and their lengths overlap those
-of real branches, so no length threshold separates them. The projection of the label along z
-has no such spurs: a real vessel end or branch is still a tip of the projected graph. So a leaf
-branch of the 3D graph is kept only if
+A leaf branch is removed when it reaches less than ``spur_reach`` parent radii out of its
+parent vessel in the image plane (in 3D, in XY). This is the knob of the leaves: higher values
+remove more spurs and more short real branches.
+
+In 3D, with a low axial resolution (widefield or confocal 10x), vessels in the label are
+several times taller than wide. The skeleton of such a cross-section grows short branches
+towards the top and bottom of the vessel (z-spurs). Their 3D lengths overlap those of real
+branches, but their reach in XY is small. Real vessel ends that point along z are short in XY
+too; the projection of the label along z tells them apart: a real vessel end or branch is a tip
+of the projected graph, a z-spur is not. So, in 3D, a leaf branch is also kept if
 
 - a tip of the projected graph matches it (within ``match_distance`` in XY, pointing the same
   way in XY), or
-- it reaches at least ``xy_keep`` out of its parent vessel in XY (it would be a branch of the
-  projected graph too; if it has no tip there, it is hidden in the projection, e.g. under
-  another vessel), or
 - its tip is within ``face_distance`` of the top or bottom face of the image (a vessel cut by
   the image; those cut by the XY borders end in the projected graph too).
 
-The method was developed for confocal stacks of cortical capillaries
-(``context/pyvane_handoff/guided_pruning`` in the analysis that introduced it), with distances
-in voxels. Here every distance is relative to the vessel size, as in ``pyvane.graph.scaled``:
-the unit of a leaf branch is the in-plane radius of the label at its parent junction
-(``label_geometry.vessel_radius``), and the unit of the projected graph is the radius of the
-projected label. Arrays are indexed (z, y, x).
+In 2D there is no projection: only the reach rule applies.
+
+The guided pruning was developed for confocal stacks of cortical capillaries
+(``context/pyvane_handoff/guided_pruning`` in the analysis that introduced it). Every distance
+is relative to the vessel size, as in ``pyvane.graph.scaled``: the unit of a leaf branch is
+the vessel radius at its parent junction (``label_geometry.vessel_radius``), and the unit of
+the projected graph is the radius of the projected label. The default values were chosen on
+synthetic stacks with ground truth (widefield 10x and 20x, confocal 10x; exact masks and
+realistic labels). Arrays are indexed (z, y, x) or (y, x).
 """
 
 from typing import NamedTuple
 
 import networkx as nx
 import numpy as np
-from scipy.spatial import cKDTree
-
 from scipy.ndimage import distance_transform_edt
+from scipy.spatial import cKDTree
 
 from pyvane.graph.label_geometry import vessel_radius
 from pyvane.graph.refinement import _extract_trash_path, remove_degree_two_nodes
@@ -77,9 +79,9 @@ def projection_guide(bin_img: np.ndarray, prune_ratio_2d: float = 1.0,
     Args:
         bin_img: 3D binary image (z, y, x).
         prune_ratio_2d: Pruning of the projected graph, which removes the pixel noise of the
-            2D skeleton: ``bulge_ratio_threshold`` of ``refine_graph`` (leaf branches reaching
-            less than this many parent radii are removed); the other ``refine_graph``
-            parameters keep their defaults.
+            2D skeleton: ``spur_reach`` of ``refine_graph`` (leaf branches reaching less than
+            this many parent radii are removed); the other ``refine_graph`` parameters keep
+            their defaults.
         direction_length: Length of the branch end used for its direction, in units of the
             radius of the projected label at the branch's parent node.
     """
@@ -93,7 +95,7 @@ def projection_guide(bin_img: np.ndarray, prune_ratio_2d: float = 1.0,
     edt_2d = distance_transform_edt(projection)
     condensed_2d = remove_clusters(graph_from_skeleton(skeleton_2d))
     graph_2d, _, _ = refine_graph(condensed_2d, projection, edt_bg=edt_2d,
-                                  bulge_ratio_threshold=prune_ratio_2d)
+                                  spur_reach=prune_ratio_2d)
     positions, directions = [], []
     for node in graph_2d.nodes:
         if graph_2d.degree(node) != 1:
@@ -155,59 +157,64 @@ def _match_tips(graph: nx.MultiGraph, radius_map: np.ndarray, guide: ProjectionG
 
 
 def _xy_reach(graph: nx.MultiGraph, tip, parent, data: dict, radius_map: np.ndarray) -> float:
-    """How far a leaf branch reaches out of its parent vessel in XY (voxels): the largest XY
-    distance of its points to the parent center, minus the parent radius, plus the tip radius
-    (pyvane's bulge length, measured in XY). Radii are in-plane radii at the node centers."""
+    """How far a leaf branch reaches out of its parent vessel in the image plane (voxels): the
+    largest in-plane distance of its points to the parent center, minus the parent radius,
+    plus the tip radius (the bulge length of Drees et al. 2021, measured in the plane). Radii
+    are vessel radii at the node centers."""
     points = _points_from(graph, parent, tip, data)
-    reach = np.hypot(*(points[:, 1:] - points[0, 1:]).T).max()
+    reach = np.hypot(*(points[:, -2:] - points[0, -2:]).T).max()
     parent_radius = _parent_radius(graph, parent, radius_map)
     tip_radius = vessel_radius(radius_map, graph.nodes[tip]["center"])
     return float(reach - parent_radius + tip_radius)
 
 
-def prune_z_spurs(graph: nx.MultiGraph, edt_bg: np.ndarray, radius_map: np.ndarray,
-                  guide: ProjectionGuide, match_distance: float = 3.0, xy_keep: float = 4.0,
-                  direction_length: float = 3.0, face_distance: float = 0.0,
-                  keep_rings: bool = True) -> tuple[bool, list[np.ndarray]]:
-    """Removes the leaf branches that have no counterpart in the projected graph (in place).
+def prune_leaves(graph: nx.MultiGraph, edt_bg: np.ndarray, radius_map: np.ndarray,
+                 guide: ProjectionGuide | None = None, spur_reach: float = 3.0,
+                 match_distance: float = 3.0, direction_length: float = 3.0,
+                 face_distance: float = 0.0,
+                 keep_rings: bool = True) -> tuple[bool, list[np.ndarray]]:
+    """Removes the leaf branches that do not reach out of their parent vessel (in place).
 
-    Distances are in units of the in-plane radius of the label at the leaf's parent junction.
-    Repeats until nothing changes:
-    1. Each guide tip is matched to at most one leaf branch: the one whose tip is the nearest
-       in XY, within ``match_distance``, and whose end points the same way in XY. Matched
-       leaves are kept for good.
-    2. At every node of degree >= 3, the leaf branches that are not matched are removed,
-       except those reaching at least ``xy_keep`` out of their parent in XY and those whose tip
-       is within ``face_distance`` of the top or bottom face. A node keeps at least two edges
-       (the longest leaves are kept for that), as in ``prune_branches``.
+    Distances are in units of the vessel radius at the leaf's parent junction. Repeats until
+    nothing changes:
+    1. (3D, with a ``guide``) Each guide tip is matched to at most one leaf branch: the one
+       whose tip is the nearest in XY, within ``match_distance``, and whose end points the same
+       way in XY. Matched leaves are kept for good.
+    2. At every node of degree >= 3, the leaf branches that are not matched are removed if
+       they reach less than ``spur_reach`` out of their parent in the image plane, except (3D)
+       those whose tip is within ``face_distance`` of the top or bottom face. A node keeps at
+       least two edges (the longest leaves are kept for that).
     3. Nodes of degree 2 are merged.
     Only leaf branches are removed.
 
     Args:
         graph: Graph to modify in place.
-        edt_bg: Euclidean distance transform of the background (3D), for the removed paths.
+        edt_bg: Euclidean distance transform of the background, for the removed paths.
         radius_map: ``label_geometry.vessel_radius_map`` of the binary image.
-        guide: ``projection_guide`` of the binary image the graph was made from.
+        guide: ``projection_guide`` of the binary image the graph was made from (3D only);
+            None for no matching (as in 2D).
+        spur_reach: Leaves reaching less than this far out of their parent in the image plane
+            are removed (unless matched or on a z face).
         match_distance: Largest XY distance between a leaf tip and its guide tip.
-        xy_keep: Leaves reaching at least this far out of their parent in XY are kept;
-            np.inf disables the rule.
         direction_length: Length of the branch end used for its direction.
         face_distance: Leaves whose tip is this close to the top or bottom face are kept (0:
-            only tips on the face).
+            only tips on the face). Not used in 2D.
         keep_rings: Passed to ``remove_degree_two_nodes``.
 
     Returns:
         A tuple (changed, trash_paths), as the other refinement steps: whether any branch was
         removed, and the removed paths outside the junction spheres.
     """
+    is_3d = radius_map.ndim == 3
     depth = edt_bg.shape[0]
     kept_tips: set = set()
     claimed_guide_tips: set = set()
     trash_paths = []
     changed = False
     while True:
-        _match_tips(graph, radius_map, guide, kept_tips, claimed_guide_tips, match_distance,
-                    direction_length)
+        if guide is not None:
+            _match_tips(graph, radius_map, guide, kept_tips, claimed_guide_tips,
+                        match_distance, direction_length)
         edges_to_delete = []
         for node in list(graph.nodes):
             if graph.degree(node) <= 2:
@@ -219,11 +226,12 @@ def prune_z_spurs(graph: nx.MultiGraph, edt_bg: np.ndarray, radius_map: np.ndarr
                 tip = v if u == node else u
                 if graph.degree(tip) != 1 or tip in kept_tips:
                     continue
-                tip_z = graph.nodes[tip]["center"][0]
-                if (tip_z <= face_distance * radius
-                        or tip_z >= depth - 1 - face_distance * radius):
-                    continue
-                if _xy_reach(graph, tip, node, data, radius_map) >= xy_keep * radius:
+                if is_3d:
+                    tip_z = graph.nodes[tip]["center"][0]
+                    if (tip_z <= face_distance * radius
+                            or tip_z >= depth - 1 - face_distance * radius):
+                        continue
+                if _xy_reach(graph, tip, node, data, radius_map) >= spur_reach * radius:
                     continue
                 removable.append((data["length"], tip, u, v, key))
             if not removable:

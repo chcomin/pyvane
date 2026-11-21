@@ -10,7 +10,7 @@ from pyvane.graph.creation import (
     map_foreground_to_graph,
     remove_clusters,
 )
-from pyvane.graph.refinement import refine_graph
+from pyvane.graph.refinement import refine_graph, to_simple_graph
 from pyvane.metrics import metrics
 from pyvane.skeletonization import lee
 
@@ -51,20 +51,8 @@ def test_graph():
 
     init_graph = graph_from_skeleton(skel_img, keep_rings = False)
     cond_graph = remove_clusters(init_graph)
-    simple_graph, edt_bg, trash_paths = refine_graph(
-        cond_graph, 
-        bin_img,
-        bulge_ratio_threshold = 2.0,
-        bulge_size_threshold = 0.0,
-        elongation_threshold = 0.0,
-        multi_edge_threshold = None, 
-        self_loop_threshold = None, 
-        bridge_radius_ratio_threshold = 0.5,
-        bridge_length_ratio_threshold = 1.0,
-        collapse_length_ratio_threshold = 1.0,
-        comp_size_threshold = 0, 
-        comp_length_threshold = 1.0, 
-        )
+    simple_graph, edt_bg, trash_paths = refine_graph(cond_graph, bin_img)
+    to_simple_graph(simple_graph)
 
     assign_node_radii_and_outer_props(simple_graph, edt_bg)
 

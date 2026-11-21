@@ -1,5 +1,5 @@
-"""The refine_graph thresholds are relative to the vessel radius: a phantom drawn at twice the
-size gives the same graph with the same parameters."""
+"""The refine_graph knobs are relative to the vessel radius: a phantom drawn at twice the size
+gives the same graph with the same values."""
 
 import networkx as nx
 import numpy as np
@@ -22,10 +22,10 @@ def _tubes(shape, segments, radius, scale):
                       radius * scale)
 
 
-def _t_with_stub(scale):
-    """A T junction with a long branch and a short stub."""
+def _t_with_stub_2d(scale):
+    """A T junction with a long branch and a short stub, in 2D (no projection guide)."""
     segments = [((8, 20, 5), (8, 20, 75)), ((8, 20, 40), (8, 55, 40)), ((8, 20, 20), (8, 27, 20))]
-    return _tubes((17, 60, 80), segments, 3, scale)
+    return _tubes((17, 60, 80), segments, 3, scale)[8 * scale]
 
 
 def _tube_with_hole(scale):
@@ -34,15 +34,18 @@ def _tube_with_hole(scale):
     return img
 
 
-def _tube_and_debris(scale):
-    img = _tubes((17, 40, 80), [((8, 10, 5), (8, 10, 75))], 3, scale)
-    return img | _tubes((17, 40, 80), [((8, 30, 40), (8, 30, 44))], 2, scale)
+def _two_close_bifurcations(scale):
+    """Branches leave a vessel on opposite sides, 4 voxels apart (a Y-Y pair)."""
+    segments = [((8, 35, 5), (8, 35, 85)), ((8, 35, 42), (8, 5, 20)), ((8, 35, 46), (8, 65, 20))]
+    return _tubes((17, 70, 90), segments, 3, scale)
 
 
-def _h_bridge(scale):
-    """Two parallel tubes joined by a thin bridge."""
-    img = _tubes((17, 40, 80), [((8, 12, 5), (8, 12, 75)), ((8, 28, 5), (8, 28, 75))], 4, scale)
-    return img | _tubes((17, 40, 80), [((8, 12, 40), (8, 28, 40))], 1.5, scale)
+def _h_bridge(scale, gap):
+    """Two parallel tubes (radius 4) whose surfaces are ``gap`` voxels apart, joined by a thin
+    bridge."""
+    y0, y1 = 12, 12 + 8 + gap
+    img = _tubes((17, 40, 80), [((8, y0, 5), (8, y0, 75)), ((8, y1, 5), (8, y1, 75))], 4, scale)
+    return img | _tubes((17, 40, 80), [((8, y0, 40), (8, y1, 40))], 1.5, scale)
 
 
 def _counts(graph):
@@ -55,36 +58,34 @@ def _counts(graph):
             "components": nx.number_connected_components(graph)}
 
 
-def _refine(img, **params):
+def _refine(img, **knobs):
     skeleton = lee.skeletonize(img, method="fixed")
-    graph, _, _ = refine_graph(remove_clusters(graph_from_skeleton(skeleton)), img, **params)
+    graph, _, _ = refine_graph(remove_clusters(graph_from_skeleton(skeleton)), img, **knobs)
     return _counts(graph)
 
 
-# (phantom, parameters, expected counts): each rule on and off
+def _expected(branch_points, leaves, multi_pairs, components):
+    return {"branch_points": branch_points, "leaves": leaves, "multi_pairs": multi_pairs,
+            "components": components}
+
+
+# (phantom, knobs, expected counts): each knob at its default and off, and the contact rule
 CASES = [
-    (_t_with_stub, {}, {"branch_points": 1, "leaves": 3, "multi_pairs": 0, "components": 1}),
-    (_t_with_stub, {"bulge_ratio_threshold": 0.01},
-     {"branch_points": 2, "leaves": 4, "multi_pairs": 0, "components": 1}),
-    (_tube_with_hole, {"multi_edge_threshold": 20.0},
-     {"branch_points": 0, "leaves": 2, "multi_pairs": 0, "components": 1}),
-    (_tube_with_hole, {"multi_edge_threshold": 0.0},
-     {"branch_points": 2, "leaves": 2, "multi_pairs": 1, "components": 1}),
-    (_tube_and_debris, {"comp_length_threshold": 5.0},
-     {"branch_points": 0, "leaves": 2, "multi_pairs": 0, "components": 1}),
-    (_tube_and_debris, {"comp_length_threshold": 0.0},
-     {"branch_points": 0, "leaves": 4, "multi_pairs": 0, "components": 2}),
-    (_h_bridge, {"bridge_length_ratio_threshold": 3.0},
-     {"branch_points": 0, "leaves": 4, "multi_pairs": 0, "components": 2}),
-    (_h_bridge, {"bridge_length_ratio_threshold": 0.0},
-     {"branch_points": 2, "leaves": 4, "multi_pairs": 0, "components": 1}),
+    (_t_with_stub_2d, {}, _expected(1, 3, 0, 1)),
+    (_t_with_stub_2d, {"spur_reach": 0.0}, _expected(2, 4, 0, 1)),
+    (_tube_with_hole, {}, _expected(0, 2, 0, 1)),
+    (_tube_with_hole, {"tunnel_width": 0.0}, _expected(2, 2, 1, 1)),
+    (_two_close_bifurcations, {}, _expected(1, 4, 0, 1)),
+    (_two_close_bifurcations, {"junction_reach": 0.0}, _expected(2, 4, 0, 1)),
+    (lambda scale: _h_bridge(scale, gap=2), {}, _expected(0, 4, 0, 2)),     # removed
+    (lambda scale: _h_bridge(scale, gap=12), {}, _expected(2, 4, 0, 1)),    # too long: kept
 ]
 
 
-@pytest.mark.parametrize("phantom, params, expected", CASES)
+@pytest.mark.parametrize("phantom, knobs, expected", CASES)
 @pytest.mark.parametrize("scale", [1, 2])
-def test_same_graph_at_twice_the_size(phantom, params, expected, scale):
-    assert _refine(phantom(scale), **params) == expected
+def test_same_graph_at_twice_the_size(phantom, knobs, expected, scale):
+    assert _refine(phantom(scale), **knobs) == expected
 
 
 def test_vessel_radius_map_is_in_plane_in_3d_and_the_edt_in_2d():
