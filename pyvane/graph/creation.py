@@ -591,6 +591,7 @@ def create_graph(
     scaled_params: dict | None = None,
     keep_rings: bool = True, 
     full_output: bool = False,
+    refine_params: dict | None = None,
     ) -> nx.MultiGraph | tuple[nx.MultiGraph, np.ndarray, list[np.ndarray]]:
     """Main function to create a graph from a skeleton image and its corresponding binary mask.
     
@@ -636,6 +637,11 @@ def create_graph(
         keep_rings: Whether to keep pure rings (isolated loops) in the graph.
         full_output: If True, also returns the Euclidean distance transform and the list
             of paths removed during refinement.
+        refine_params: For ``method="refine"``, parameters of
+            ``pyvane.graph.refinement.refine_graph`` that replace the values set by this
+            function. For example, all the optional steps with their recommended values:
+            ``{"z_spur_params": {}, "tunnel_width": 3.0, "crossing_angle": 150.0,
+            "crossing_collapse_ratio": 2.5}``.
 
     Returns:
         The refined graph, or a tuple (graph, edt_bg, trash_paths) when ``full_output``
@@ -644,6 +650,8 @@ def create_graph(
     """
 
     if method == "scaled":
+        if refine_params is not None:
+            raise ValueError('refine_params is only used with method="refine".')
         simple_graph, edt_bg, trash_paths = _create_scaled(
             skel_img, bin_img, keep_rings, scaled_params)
         assign_node_radii_and_outer_props(simple_graph, edt_bg)
@@ -652,6 +660,20 @@ def create_graph(
         raise ValueError(f'Unknown method "{method}"; use "refine" or "scaled".')
     if scaled_params is not None:
         raise ValueError('scaled_params is only used with method="scaled".')
+    params = {
+        "bulge_len_threshold": length_threshold,
+        "bulge_size_threshold": 0.0,
+        "bulge_ratio_threshold": 0.0,
+        "elongation_threshold": 0.0,
+        "multi_edge_threshold": length_threshold,
+        "self_loop_threshold": length_threshold,
+        "bridge_radius_ratio_threshold": 0.5,
+        "bridge_length_threshold": 3.0,
+        "collapse_length_ratio_threshold": 1.0,
+        "comp_size_threshold": 0,
+        "comp_length_threshold": 1.0,
+    }
+    params.update(refine_params or {})
 
     # Create initial graph that represents all skeleton pixels as accurately as possible
     init_graph = graph_from_skeleton(skel_img, keep_rings = keep_rings)
@@ -661,21 +683,7 @@ def create_graph(
 
     # Refine the graph topology
     simple_graph, edt_bg, trash_paths = refine_graph(
-        cond_graph, 
-        bin_img,
-        bulge_len_threshold = length_threshold,
-        bulge_size_threshold = 0.0,
-        bulge_ratio_threshold = 0.0,
-        elongation_threshold = 0.0,
-        multi_edge_threshold = length_threshold, 
-        self_loop_threshold = length_threshold, 
-        bridge_radius_ratio_threshold = 0.5,
-        bridge_length_threshold = 3.0,
-        collapse_length_ratio_threshold = 1.0,
-        comp_size_threshold = 0, 
-        comp_length_threshold = 1.0, 
-        keep_rings = keep_rings
-        )
+        cond_graph, bin_img, keep_rings=keep_rings, **params)
 
     assign_node_radii_and_outer_props(simple_graph, edt_bg)
     simple_graph.graph["method"] = "refine"
@@ -709,7 +717,8 @@ def create_graph_with_mapping(
     length_threshold: float = 5.0,
     scaled_params: dict | None = None,
     edges_only: bool = True,
-    keep_rings: bool = True
+    keep_rings: bool = True,
+    refine_params: dict | None = None,
     ) -> tuple[nx.MultiGraph, np.ndarray, dict] | tuple[nx.MultiGraph, np.ndarray, dict, dict]:
     """Creates a graph and also returns a mapping from the foreground pixels to the graph structure.
     
@@ -723,6 +732,7 @@ def create_graph_with_mapping(
         method: Graph creation method, "refine" or "scaled" (see `create_graph`).
         length_threshold: Minimum length for edges to be retained during refinement.
         scaled_params: Parameters of the "scaled" method (see `create_graph`).
+        refine_params: Parameters of the "refine" method (see `create_graph`).
         edges_only: If True, pixels are only mapped to graph edges. If False, pixels are
             also mapped to junction nodes when they are closer to a junction than to an
             edge.
@@ -743,7 +753,8 @@ def create_graph_with_mapping(
         length_threshold = length_threshold,
         scaled_params = scaled_params,
         keep_rings = keep_rings, 
-        full_output = True
+        full_output = True,
+        refine_params = refine_params,
     )
 
     labeled_volume, *maps = map_foreground_to_graph(

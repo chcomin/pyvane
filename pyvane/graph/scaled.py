@@ -61,82 +61,25 @@ from pyvane.graph.refinement import (
     _line_between_centers,
     remove_degree_two_nodes,
 )
+from pyvane.graph.label_geometry import (  # noqa: F401  (also part of this module's API)
+    MAX_RADIUS,
+    best_pairing,
+    half_height,
+    inplane_edt,
+    label_elongation,
+    paths_close,
+)
 from pyvane.graph.util import compute_arc_length
 from pyvane.skeletonization import lee
 
 DEFAULTS = {"spur_reach": "auto", "junction_reach": 2.0, "tunnel_width": 2.0,
             "crossing_angle": 150.0, "z_mode": "add"}
 
-# Cap for distance values (voxels), so that a label touching no background gives finite radii
-MAX_RADIUS = 1e3
-
-
 def default_spur_reach(elongation: float) -> float:
     """``spur_reach`` for a label of this elongation: 1.25 + 0.2 x (elongation - 1), with the
     elongation at least 1 (1.25 for round vessels, about 2 for confocal labels 5x taller than
     wide)."""
     return 1.25 + 0.2 * (max(1.0, elongation) - 1.0)
-
-
-# ----- maps -------------------------------------------------------------------------------
-
-def inplane_edt(bin_img: np.ndarray) -> np.ndarray:
-    """Distance (voxels) of every foreground voxel to the background of its own z slice.
-
-    Args:
-        bin_img: 3D binary image (z, y, x).
-
-    Returns:
-        float32 array; 1e6 in slices without background.
-    """
-    distances = np.zeros(bin_img.shape, np.float32)
-    for z in range(bin_img.shape[0]):
-        plane = bin_img[z]
-        if not plane.any():
-            continue
-        if plane.all():
-            distances[z] = np.float32(1e6)
-        else:
-            distances[z] = ndi.distance_transform_edt(plane)
-    return distances
-
-
-def half_height(bin_img: np.ndarray, voxel) -> float:
-    """Half the length (voxels) of the foreground run along z through ``voxel``."""
-    column = bin_img[:, int(voxel[1]), int(voxel[2])]
-    z = int(voxel[0])
-    if not column[z]:
-        return 0.5
-    bottom = z
-    while bottom > 0 and column[bottom - 1]:
-        bottom -= 1
-    top = z
-    while top < len(column) - 1 and column[top + 1]:
-        top += 1
-    return (top - bottom + 1) / 2.0
-
-
-def label_elongation(bin_img: np.ndarray, edt_xy: np.ndarray, points: np.ndarray,
-                     n: int = 2000, seed: int = 0) -> float:
-    """Median ratio of the half-height to the in-plane radius of the label at skeleton points.
-
-    About 1 for round cross-sections (0.7-0.75 after the voxel discretization), 2.5-5 for the
-    axially blurred labels of widefield or confocal stacks.
-
-    Args:
-        bin_img: 3D binary image.
-        edt_xy: ``inplane_edt(bin_img)``.
-        points: (n, 3) skeleton voxels.
-        n: Number of points sampled.
-        seed: Seed of the sampling.
-    """
-    if len(points) == 0:
-        return 1.0
-    rng = np.random.default_rng(seed)
-    sample = points[rng.choice(len(points), min(n, len(points)), replace=False)]
-    ratios = [half_height(bin_img, voxel) / max(float(edt_xy[tuple(voxel)]), 0.5)
-              for voxel in sample]
-    return float(np.median(ratios))
 
 
 # ----- preparation ------------------------------------------------------------------------
@@ -317,38 +260,6 @@ def _rejoin(graph: nx.MultiGraph, node, other, path_from_node: np.ndarray):
     path = np.asarray(path, np.int32).reshape(-1, 3)
     graph.add_edge(node, other, path=path,
                    length=float(compute_arc_length(path, node, other, graph)))
-
-
-def paths_close(path_a: np.ndarray, path_b: np.ndarray, edt_xy: np.ndarray,
-                elongation: float, width: float = 1.0) -> bool:
-    """Whether two paths stay within ``width`` local label widths of each other.
-
-    The local label width is 2 x the in-plane distance to the background + 1 voxel, taken at
-    each point; z distances are divided by ``elongation``.
-    """
-    if len(path_a) == 0 or len(path_b) == 0:
-        return True
-    scale = np.array([1.0 / elongation, 1.0, 1.0])
-    for path, other_path in ((path_a, path_b), (path_b, path_a)):
-        distances, _ = cKDTree(other_path * scale).query(path * scale)
-        inplane_radii = np.minimum(edt_xy[tuple(np.asarray(path, int).T)], MAX_RADIUS)
-        label_widths = 2.0 * inplane_radii + 1.0
-        if np.any(distances > width * label_widths):
-            return False
-    return True
-
-
-def _best_pairing(directions: np.ndarray):
-    """Pairing of 4 unit vectors into 2 pairs that maximizes the smaller angle (degrees)
-    between the vectors of a pair. Returns (smaller angle, pairs)."""
-    pairings = (((0, 1), (2, 3)), ((0, 2), (1, 3)), ((0, 3), (1, 2)))
-    best_angle, best_pairs = -1.0, pairings[0]
-    for pairs in pairings:
-        angles = [np.degrees(np.arccos(np.clip(directions[i] @ directions[j], -1, 1)))
-                  for i, j in pairs]
-        if min(angles) > best_angle:
-            best_angle, best_pairs = min(angles), pairs
-    return best_angle, best_pairs
 
 
 def _junction_regions(graph: nx.MultiGraph, junctions: list, axes: dict) -> list[list]:
@@ -603,7 +514,7 @@ def merge_junction_regions(graph: nx.MultiGraph, prep: ScaledInput,
                                    if e.exit_point is not None], float)
             if len(directions) == 4:
                 directions /= np.linalg.norm(directions, axis=1, keepdims=True)
-                angle, pairs = _best_pairing(directions)
+                angle, pairs = best_pairing(directions)
                 if angle >= crossing_angle:
                     far_nodes = [e.far_node for e in kept]
                     graph.nodes[node]["crossing"] = True

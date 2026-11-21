@@ -16,8 +16,7 @@ import networkx as nx
 import numpy as np
 from scipy import ndimage as ndi
 
-# Cap for distance values (voxels), so that a label touching no background gives finite radii
-MAX_RADIUS = 1e3
+from pyvane.graph.label_geometry import MAX_RADIUS, inplane_edt, label_elongation
 # Smallest radius assigned to a point inside the label
 MIN_RADIUS = 0.5
 
@@ -216,16 +215,13 @@ def measure_edges(graph: nx.MultiGraph, bin_img: np.ndarray, pix_size=(1.0, 1.0,
         graph: Graph with node ``center`` and edge ``path``.
         bin_img: The 3D binary image the graph was made from.
         pix_size: Voxel size.
-        edt_xy: In-plane distance transform of ``bin_img`` (``scaled.inplane_edt``);
+        edt_xy: In-plane distance transform of ``bin_img`` (``label_geometry.inplane_edt``);
             computed if None.
-        elongation: Label elongation (``scaled.label_elongation``); taken from
+        elongation: Label elongation (``label_geometry.label_elongation``); taken from
             ``graph.graph["elongation"]`` or measured at the edge paths if None.
         sigma: Smoothing in points, or "auto" (``auto_sigma``).
         extend_tips: Continue leaf edges to the label surface (at most two mean radii).
     """
-    # Imported here because pyvane.graph.scaled is a graph-creation module
-    from pyvane.graph.scaled import inplane_edt, label_elongation
-
     if edt_xy is None:
         edt_xy = inplane_edt(bin_img)
     if elongation is None:
