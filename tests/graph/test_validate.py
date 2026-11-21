@@ -11,7 +11,7 @@ from pyvane.graph.refinement import refine_graph
 from pyvane.graph.validate import check_graph
 from pyvane.skeletonization import lee
 
-STEPS = ["degree_two", "multi_edges", "self_loops", "false_anastomoses", "prune", "collapse"]
+STEPS = ["degree_two", "false_anastomoses", "leaves", "collapse", "tunnels"]
 
 
 def _condensed():
@@ -29,24 +29,20 @@ def test_step_callback_reports_every_step_and_the_graph_stays_valid():
         # between steps degree-2 nodes may exist (they are merged at the start of each pass)
         assert check_graph(graph, bin_img, allow_degree_two=True, min_inside=0.0) == []
 
-    graph, _, trash = refine_graph(cond, bin_img, bulge_len_threshold=5.0,
-                                   multi_edge_threshold=5.0, self_loop_threshold=5.0,
-                                   step_callback=cb)
+    graph, _, trash = refine_graph(cond, bin_img, step_callback=cb)
     names = [c[0] for c in calls]
-    assert names[:6] == STEPS and names[-1] == "components"
-    n_pass = (len(names) - 1) // len(STEPS)
-    assert names[:-1] == STEPS * n_pass and n_pass >= 2
+    n_pass = len(names) // len(STEPS)
+    assert names == STEPS * n_pass and n_pass >= 2
     # the last pass changes nothing; every trash path was reported to the callback
-    assert not any(c[1] for c in calls[-1 - len(STEPS):-1])
+    assert not any(c[1] for c in calls[-len(STEPS):])
     assert sum(c[2] for c in calls) == len(trash)
     assert check_graph(graph, bin_img, min_inside=0.0) == []
 
 
 def test_callback_does_not_change_the_result():
     bin_img, cond = _condensed()
-    a, _, _ = refine_graph(cond, bin_img, bulge_len_threshold=5.0)
-    b, _, _ = refine_graph(cond, bin_img, bulge_len_threshold=5.0,
-                           step_callback=lambda *args: None)
+    a, _, _ = refine_graph(cond, bin_img)
+    b, _, _ = refine_graph(cond, bin_img, step_callback=lambda *args: None)
 
     def summary(g):
         nodes = {n: tuple(c) for n, c in g.nodes(data="center")}

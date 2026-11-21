@@ -36,11 +36,18 @@ def test_scaled_gives_the_scaled_graph_with_the_create_graph_attributes(t_juncti
                for *_, data in graph.edges(data=True))
 
 
-def test_scaled_params_are_passed(t_junction):
+@pytest.mark.parametrize("method", ["refine", "scaled"])
+def test_knobs_are_passed_and_recorded(t_junction, method):
     skel, img = t_junction
-    tight = create_graph(skel, img, method="scaled", scaled_params={"spur_reach": 0.1})
-    loose = create_graph(skel, img, method="scaled", scaled_params={"spur_reach": 10.0})
+    tight = create_graph(skel, img, method=method, spur_reach=0.1)
+    loose = create_graph(skel, img, method=method, spur_reach=10.0)
     assert loose.number_of_edges() <= tight.number_of_edges()
+    assert loose.graph["params"]["spur_reach"] == 10.0
+    default = create_graph(skel, img, method=method)
+    assert set(default.graph["params"]) >= {"spur_reach", "junction_reach", "tunnel_width"}
+    # "auto" is resolved to the value used
+    if method == "scaled":
+        assert isinstance(default.graph["params"]["spur_reach"], float)
 
 
 def test_full_output_and_mapping_work_with_both_methods(t_junction):
@@ -59,6 +66,6 @@ def test_invalid_combinations_raise(t_junction):
     with pytest.raises(ValueError):
         create_graph(skel, img, method="other")
     with pytest.raises(ValueError):
-        create_graph(skel, img, scaled_params={"spur_reach": 2.0})
+        create_graph(skel, img, crossing_angle=150.0)       # refine does not flag crossings
     with pytest.raises(ValueError):
         create_graph(skel[8], img[8], method="scaled")

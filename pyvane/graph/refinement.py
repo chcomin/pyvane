@@ -6,6 +6,12 @@ import networkx as nx
 import numpy as np
 from scipy.ndimage import distance_transform_edt
 
+from pyvane.graph.label_geometry import (
+    label_elongation,
+    paths_close,
+    vessel_radius,
+    vessel_radius_map,
+)
 from pyvane.graph.util import (
     bresenham_3d,
     compute_arc_length,
@@ -13,6 +19,11 @@ from pyvane.graph.util import (
     get_outer_path_radii,
 )
 from pyvane.util.misc import scalar
+
+# Defaults of the knobs, chosen on synthetic stacks with ground truth (see refine_graph)
+SPUR_REACH = 3.0
+JUNCTION_REACH = 1.5
+TUNNEL_WIDTH = 3.0
 
 
 def remove_degree_two_nodes(graph: nx.MultiGraph, keep_rings: bool = True) -> bool:
@@ -145,28 +156,32 @@ def _extract_trash_path(
 def remove_false_anastomoses(
         graph: nx.MultiGraph, 
         edt_bg: np.ndarray, 
-        radius_ratio_threshold: float = 0.25, 
-        length_threshold: float = 5.0
+        radius_map: np.ndarray,
+        radius_ratio_threshold: float = 0.7, 
+        length_ratio_threshold: float = 1.0
         ) -> tuple[bool, list[np.ndarray]]:
     """Removes thin, short H-bridge edges that spuriously connect two thicker vessels.
 
-    An edge is removed when both its minimum radius relative to the parent vessel radii
-    falls below ``radius_ratio_threshold`` and its exposed length is shorter than
-    ``length_threshold``. Long capillary connections are preserved.
+    An edge between two junctions is removed when its minimum radius is below
+    ``radius_ratio_threshold`` times the smaller junction radius and its exposed length
+    (outside the two junctions) is below ``length_ratio_threshold`` times the smaller
+    junction radius. Long capillary connections are preserved.
 
     Args:
         graph: The graph to modify in-place.
-        edt_bg: Euclidean distance transform of the background.
-        radius_ratio_threshold: Fraction of the smaller parent radius below which the
+        edt_bg: Euclidean distance transform of the background (for the removed paths).
+        radius_map: Vessel radius map (``label_geometry.vessel_radius_map``).
+        radius_ratio_threshold: Fraction of the smaller junction radius below which the
             bridge minimum radius is considered thin.
-        length_threshold: Maximum exposed outer length for a thin bridge to be removed.
+        length_ratio_threshold: Largest exposed length of a removed bridge, in units of the
+            smaller junction radius.
 
     Returns:
         A tuple (changed, trash_paths) where ``changed`` is True if the topology was
         altered and ``trash_paths`` is a list of removed pixel coordinate arrays.
     """
 
-    if radius_ratio_threshold <= 0 or length_threshold <= 0:
+    if radius_ratio_threshold <= 0 or length_ratio_threshold <= 0:
         return False, []
 
     edges_to_delete = []
@@ -177,13 +192,14 @@ def remove_false_anastomoses(
             continue  # Ignore self-loops
             
         if graph.degree(u) > 2 and graph.degree(v) > 2:
-            r_u = edt_bg[tuple(graph.nodes[u]["center"])]
-            r_v = edt_bg[tuple(graph.nodes[v]["center"])]
+            r_u = vessel_radius(radius_map, graph.nodes[u]["center"])
+            r_v = vessel_radius(radius_map, graph.nodes[v]["center"])
 
-            _, min_radius = get_outer_path_radii(graph, u, v, key, r_u, r_v, edt_bg)
+            _, min_radius = get_outer_path_radii(graph, u, v, key, r_u, r_v, radius_map)
                 
-            is_thin = min_radius < radius_ratio_threshold * min(r_u, r_v)
-            is_short = max(0.0, data["length"] - (r_u + r_v)) < length_threshold
+            r_min = min(r_u, r_v)
+            is_thin = min_radius < radius_ratio_threshold * r_min
+            is_short = max(0.0, data["length"] - (r_u + r_v)) < length_ratio_threshold * r_min
             
             if is_thin and is_short:
                 edges_to_delete.append((u, v, key))
@@ -198,287 +214,6 @@ def remove_false_anastomoses(
         return True, trash_paths
         
     return False, []
-
-def resolve_multi_edges(
-        graph: nx.MultiGraph, 
-        edt_bg: np.ndarray, 
-        threshold: float | None = 0.0
-        ) -> tuple[bool, list[np.ndarray]]:
-    """Removes short duplicate edges between the same pair of nodes.
-
-    For each node pair with multiple edges, the longest edge is always preserved. Other
-    edges shorter than ``threshold`` are removed. Pass ``threshold=None`` to remove all
-    but the longest edge regardless of length.
-
-    Args:
-        graph: The graph to modify in-place.
-        edt_bg: Euclidean distance transform of the background.
-        threshold: Duplicate edges shorter than this value are removed. Pass None to
-            remove all duplicates; pass 0 to skip multi-edge resolution entirely.
-
-    Returns:
-        A tuple (changed, trash_paths) where ``changed`` is True if any edges were
-        removed and ``trash_paths`` is a list of removed pixel coordinate arrays.
-    """
-
-    if threshold == 0:
-        return False, []
-
-    changed = False
-    trash_paths = []
-    
-    # Identify pairs of nodes that have multiple edges between them
-    multi_pairs = set()
-    for u, v in graph.edges():
-        if u != v and graph.number_of_edges(u, v) > 1:
-            multi_pairs.add(tuple(sorted((u, v))))
-
-    for u, v in multi_pairs:
-        edges_dict = graph[u][v]
-        
-        # Identify the largest edge to protect it
-        max_len = -1
-        max_key = None
-        for key, data in edges_dict.items():
-            if data["length"] > max_len:
-                max_len = data["length"]
-                max_key = key
-
-        keys_to_remove = []
-        for key, data in edges_dict.items():
-            if key == max_key:
-                continue # Always protect the largest edge
-            
-            if threshold is None:
-                keys_to_remove.append(key)
-            elif threshold == 0:
-                pass # Keep all
-            elif data["length"] < threshold:
-                keys_to_remove.append(key)
-                
-        for key in keys_to_remove:
-            trash_path = _extract_trash_path(graph, u, v, key, edt_bg)
-            if len(trash_path) > 0:
-                trash_paths.append(trash_path)
-            graph.remove_edge(u, v, key)
-            changed = True
-
-    return changed, trash_paths
-
-def resolve_self_loops(
-        graph: nx.MultiGraph, 
-        edt_bg: np.ndarray, 
-        threshold: float | None = 0.0
-        ) -> tuple[bool, list[np.ndarray]]:
-    """Removes short self-loop edges from the graph.
-
-    Applies the same length heuristic as ``resolve_multi_edges``.
-
-    Args:
-        graph: The graph to modify in-place.
-        edt_bg: Euclidean distance transform of the background.
-        threshold: Self-loops shorter than this value are removed. Pass None to remove
-            all self-loops; pass 0 to skip self-loop resolution entirely.
-
-    Returns:
-        A tuple (changed, trash_paths) where ``changed`` is True if any edges were
-        removed and ``trash_paths`` is a list of removed pixel coordinate arrays.
-    """
-
-    if threshold == 0:
-        return False, []
-
-    changed = False
-    trash_paths = []
-    
-    # Identify nodes that have self-loops
-    nodes_with_loops = [n for n in graph.nodes() if graph.number_of_edges(n, n) > 0]
-
-    for n in nodes_with_loops:
-        edges_dict = graph[n][n]
-
-        keys_to_remove = []
-        for key, data in edges_dict.items():
-            if threshold is None:
-                keys_to_remove.append(key)
-            elif threshold == 0:
-                pass
-            elif data["length"] < threshold:
-                keys_to_remove.append(key)
-
-        for key in keys_to_remove:
-            trash_path = _extract_trash_path(graph, n, n, key, edt_bg)
-            if len(trash_path) > 0:
-                trash_paths.append(trash_path)
-            graph.remove_edge(n, n, key)
-            changed = True
-
-    return changed, trash_paths
-
-def _evaluate_branch_metrics(
-        graph: nx.MultiGraph, 
-        u: int, 
-        v: int, 
-        key: int, 
-        edt_bg: np.ndarray
-        ) -> tuple[float, float, float, float]:
-    """Computes pruning metrics for a candidate leaf-branch edge.
-
-    Zeroes internal radii for endpoint nodes and samples only the exposed outer path
-    when computing radii-based ratios.
-
-    Args:
-        graph: The graph containing the edge.
-        u: Source node identifier.
-        v: Target node identifier.
-        key: Edge key in the multigraph.
-        edt_bg: Euclidean distance transform of the background.
-
-    Returns:
-        A tuple (bulge_len, bulge_size, bulge_ratio, elongation). Values are -1.0 for
-        non-leaf edges where a metric is undefined.
-    """
-    deg_u = graph.degree(u)
-    deg_v = graph.degree(v)
-    
-    # Identify radii, enforcing r=0 for endpoints
-    r_u = edt_bg[tuple(graph.nodes[u]["center"])] if deg_u > 1 else 0.0
-    r_v = edt_bg[tuple(graph.nodes[v]["center"])] if deg_v > 1 else 0.0
-    
-    # Calculate average radius along the path
-    mean_radius, _ = get_outer_path_radii(graph, u, v, key, r_u, r_v, edt_bg)
-        
-    if mean_radius <= 0:
-        return 0.0, 0.0, 0.0, 0.0
-        
-    length = graph[u][v][key]["length"]
-    diameter = 2.0 * mean_radius
-    
-    # Elongation
-    outer_len = max(0.0, float(length - r_u - r_v))
-    elongation = outer_len / diameter
-    
-    # Bulge Size (Only valid for branch-to-leaf connections)
-    if (deg_u == 1 and deg_v > 1) or (deg_u > 1 and deg_v == 1):
-        # r_parent is the radius > 0, r_tip is the radius from the endpoint
-        r_parent = r_u if deg_u > 1 else r_v
-        
-        n_e = u if deg_u == 1 else v
-        r_tip = edt_bg[tuple(graph.nodes[n_e]["center"])]
-        
-        bulge_len = max(0.0, float(length - r_parent + r_tip))
-        bulge_ratio = bulge_len / (r_parent + 1e-6)
-        bulge_size = bulge_len / mean_radius
-    else:
-        # Not a leaf branch
-        bulge_len = -1.0 
-        bulge_size = -1.0 
-        bulge_ratio = -1.0 
-        
-    return bulge_len, bulge_size, bulge_ratio, elongation
-
-def prune_branches(
-        graph: nx.MultiGraph, 
-        edt_bg: np.ndarray, 
-        bulge_len_threshold: float = 4.0, 
-        bulge_size_threshold: float = 2.0,
-        bulge_ratio_threshold: float = 0.5,
-        elongation_threshold: float = 1.0, 
-        ) -> tuple[bool, list[np.ndarray]]:
-    """Iteratively prunes leaf branches that are likely segmentation artifacts.
-
-    Leaf branches at each branching node are evaluated with multiple heuristics.
-    Topology is protected by always preserving at least two edges at each junction.
-
-    Args:
-        graph: The graph to modify in-place.
-        edt_bg: Euclidean distance transform of the background.
-        bulge_len_threshold: Leaf branches with bulge length below this value are pruned.
-        bulge_size_threshold: Leaf branches with bulge size below this value are absorbed.
-        bulge_ratio_threshold: Leaf branches with bulge ratio below this value are pruned.
-        elongation_threshold: Leaf branches with elongation below this value are absorbed.
-
-    Returns:
-        A tuple (changed, trash_paths) where ``changed`` is True if any edges were
-        removed and ``trash_paths`` lists pixel coordinate arrays of truly pruned paths.
-    """
-
-    if (bulge_len_threshold <= 0 and bulge_size_threshold <= 0 and bulge_ratio_threshold <= 0 and 
-        elongation_threshold <= 0):
-        return False, []
-
-    graph_changed = False
-    iteration_changed = True
-    trash_paths = []
-    
-    while iteration_changed:
-        iteration_changed = False
-        edges_to_delete = []
-        
-        for node in list(graph.nodes()):
-            if node not in graph or graph.degree(node) <= 2:
-                continue
-                
-            incident_edges = list(graph.edges(node, keys=True))
-            potentially_deletable = []
-            
-            for u, v, key in incident_edges:
-                other_node = v if u == node else u
-                
-                # Check if it's a leaf branch
-                if graph.degree(other_node) == 1:
-                    *bulge_stats, elongation = _evaluate_branch_metrics(graph, u, v, key, edt_bg)
-                    bulge_len, bulge_size, bulge_ratio = bulge_stats
-                    
-                    is_artifact = False
-                    to_trash = False
-
-                    # Check for pure artifact (Trash)
-                    if bulge_len < bulge_len_threshold or bulge_ratio < bulge_ratio_threshold:
-                        is_artifact = True
-                        to_trash = True
-                    # Check for anatomical surface bump (Absorb)
-                    elif bulge_size < bulge_size_threshold or elongation < elongation_threshold:
-                        is_artifact = True
-                        to_trash = False
-
-                    if is_artifact:
-                        potentially_deletable.append((u, v, key, bulge_len, to_trash))
-                        
-            if not potentially_deletable:
-                continue
-                
-            # Voreen Topology Protection Logic (Keep at least 2 edges)
-            total_edges = len(incident_edges)
-            num_kept = total_edges - len(potentially_deletable)
-            
-            if num_kept >= 2:
-                for item in potentially_deletable:
-                    edges_to_delete.append(item)
-            else:
-                potentially_deletable.sort(key=lambda x: x[3], reverse=True)
-                slice_idx = 1 if num_kept == 1 else 2
-                for item in potentially_deletable[slice_idx:]:
-                    edges_to_delete.append(item)
-                    
-        if edges_to_delete:
-            iteration_changed = True
-            graph_changed = True
-            
-            for u, v, key, _, to_trash in edges_to_delete:
-                if graph.has_edge(u, v, key):
-                    if to_trash:
-                        trash_path = _extract_trash_path(graph, u, v, key, edt_bg)
-                        if len(trash_path) > 0:
-                            trash_paths.append(trash_path)
-                    graph.remove_edge(u, v, key)
-                    
-            orphans = [n for n in graph.nodes() if graph.degree(n) == 0]
-            graph.remove_nodes_from(orphans)
-            
-            remove_degree_two_nodes(graph)
-                
-    return graph_changed, trash_paths
 
 def _bridge_from_center(
         center: np.ndarray, ordered_path: np.ndarray, is_2d: bool) -> np.ndarray:
@@ -542,10 +277,80 @@ def _is_collapsible_bridge(graph: nx.MultiGraph, u: int, v: int) -> bool:
         return False
     return not graph.has_edge(v, v)
 
+def _path_centrality(path: np.ndarray, edt_bg: np.ndarray) -> float:
+    """Mean distance to the background along a path (0 for an empty path)."""
+    path = np.asarray(path, int)
+    return float(np.mean(edt_bg[tuple(path.T)])) if len(path) else 0.0
+
+def merge_tunnels(
+        graph: nx.MultiGraph, edt_bg: np.ndarray, radius_map: np.ndarray, elongation: float,
+        tunnel_width: float = 3.0) -> tuple[bool, list[np.ndarray]]:
+    """Merges the edges that run around a hole in the label into one (in place).
+
+    A hole through a vessel's label (a tunnel) makes its skeleton split into two paths
+    around the hole: two edges between the same nodes, or a self-loop. Rather than by the
+    edge length, a pair of paths is a tunnel when they stay close to each other everywhere,
+    in units of the local label width:
+
+    - for each pair of nodes joined by several edges, the most central edge (largest mean
+      distance to the background) is kept, and every other edge whose path stays within
+      ``tunnel_width`` label widths of it is removed;
+    - a self-loop whose two halves stay within ``tunnel_width`` label widths of each other is
+      removed.
+
+    Real loops (two vessels joining the same junctions, rings) stay apart by more than a
+    vessel width and are kept. The label width is 2 x the vessel radius + 1 voxel
+    (``label_geometry.paths_close``); in 3D, z distances are divided by ``elongation``, the
+    ratio of the label's half-height to its in-plane radius.
+
+    Args:
+        graph: The graph to modify in-place.
+        edt_bg: Euclidean distance transform of the background (path centrality and the
+            removed paths).
+        radius_map: Vessel radius map (``label_geometry.vessel_radius_map``).
+        elongation: Label elongation (``label_geometry.label_elongation``); ignored in 2D.
+        tunnel_width: Largest distance between the two paths, in local label widths.
+
+    Returns:
+        A tuple (changed, trash_paths) where ``changed`` is True if any edge was removed and
+        ``trash_paths`` lists the removed paths outside the junction spheres.
+    """
+    if tunnel_width <= 0:
+        return False, []
+    elongation = max(1.0, float(elongation))
+    n_dims = radius_map.ndim
+    to_remove = []
+    pairs = {(min(u, v), max(u, v)) for u, v in graph.edges() if u != v}
+    for u, v in pairs:
+        if graph.number_of_edges(u, v) < 2:
+            continue
+        keys = sorted(graph[u][v],
+                      key=lambda key: -_path_centrality(graph[u][v][key]["path"], edt_bg))
+        main_path = np.asarray(graph[u][v][keys[0]]["path"]).reshape(-1, n_dims)
+        for key in keys[1:]:
+            path = np.asarray(graph[u][v][key]["path"]).reshape(-1, n_dims)
+            if paths_close(main_path, path, radius_map, elongation, tunnel_width):
+                to_remove.append((u, v, key))
+    for node in [n for n in graph.nodes if graph.has_edge(n, n)]:
+        for key, data in graph[node][node].items():
+            path = np.asarray(data["path"]).reshape(-1, n_dims)
+            half = len(path) // 2
+            if paths_close(path[:half], path[half:], radius_map, elongation, tunnel_width):
+                to_remove.append((node, node, key))
+    trash_paths = []
+    for u, v, key in to_remove:
+        if graph.has_edge(u, v, key):
+            trash_path = _extract_trash_path(graph, u, v, key, edt_bg)
+            if len(trash_path) > 0:
+                trash_paths.append(trash_path)
+            graph.remove_edge(u, v, key)
+    graph.remove_nodes_from([n for n in list(graph.nodes) if graph.degree(n) == 0])
+    return bool(to_remove), trash_paths
+
 def collapse_internal_bridges(
         graph: nx.MultiGraph, 
-        edt_bg: np.ndarray, 
-        collapse_length_ratio_threshold: float = 0.25
+        radius_map: np.ndarray, 
+        collapse_length_ratio_threshold: float = 1.5,
         ) -> bool:
     """Collapses short internal bridges between adjacent branching junctions.
 
@@ -561,14 +366,13 @@ def collapse_internal_bridges(
 
     Args:
         graph: The graph to modify in-place.
-        edt_bg: Euclidean distance transform of the background.
+        radius_map: Vessel radius map (``label_geometry.vessel_radius_map``).
         collapse_length_ratio_threshold: An edge is collapsed if its length divided by
             the sum of the connected node radii is below this value.
 
     Returns:
         True if at least one bridge was collapsed, False otherwise.
     """
-
     if collapse_length_ratio_threshold <= 0:
         return False
 
@@ -592,8 +396,8 @@ def collapse_internal_bridges(
             bridge_length = next(iter(graph[u][v].values()))["length"]
 
             # Get radii of the two branching nodes
-            r_u = edt_bg[tuple(graph.nodes[u]["center"])]
-            r_v = edt_bg[tuple(graph.nodes[v]["center"])]
+            r_u = vessel_radius(radius_map, graph.nodes[u]["center"])
+            r_v = vessel_radius(radius_map, graph.nodes[v]["center"])
             
             # Criterion: Junctions geometrically overlap into a single body
             if bridge_length >= (r_u + r_v) * collapse_length_ratio_threshold:
@@ -603,6 +407,7 @@ def collapse_internal_bridges(
             c_u = np.array(graph.nodes[u]["center"])
             c_v = np.array(graph.nodes[v]["center"])
             new_center = np.round((c_u + c_v) / 2.0).astype(np.int32)
+
             graph.nodes[u]["center"] = new_center
 
             # Re-join the self-loops of u to the new center, at both ends of the path.
@@ -661,135 +466,105 @@ def collapse_internal_bridges(
 
     return graph_changed
 
-def filter_components(
-        graph: nx.MultiGraph, 
-        comp_size_threshold: int = 0, 
-        comp_length_threshold: float = 0.0
-        ) -> None:
-    """Removes small connected components from the graph in-place.
+def to_simple_graph(graph: nx.MultiGraph) -> None:
+    """Turns a multigraph into a simple graph in-place: every self-loop is removed and, for
+    each pair of nodes joined by several edges, only the longest edge is kept.
 
-    A threshold of 0 means that criterion is not applied.
+    This is a conversion for analyses that need a simple graph, not a refinement heuristic:
+    the removed edges may be real vessels (e.g. two vessels joining the same junctions).
+    Degree-2 nodes left by the removals are merged into their edges.
 
     Args:
-        graph: The graph to filter in-place.
-        comp_size_threshold: Minimum number of nodes required to keep a component.
-        comp_length_threshold: Minimum total edge-length required to keep a component.
+        graph: The graph to modify in-place.
     """
-
-    if comp_size_threshold == 0 and comp_length_threshold == 0.0:
-        return
-
-    # networkx connected_components yields sets of nodes
-    components = list(nx.connected_components(graph))
-    nodes_to_remove = []
-    
-    for comp in components:
-        # Filter by number of nodes
-        if len(comp) < comp_size_threshold:
-            nodes_to_remove.extend(comp)
-            continue # Already marked for deletion, skip length check
-            
-        # Filter by total physical length
-        # Extract the subgraph to isolate this component's edges
-        subgraph = graph.subgraph(comp)
-        
-        # Sum the pre-calculated lengths of all edges in this component
-        total_length = sum(
-            data["length"] for u, v, key, data in subgraph.edges(keys=True, data=True)
-        )
-        
-        if total_length < comp_length_threshold:
-            nodes_to_remove.extend(comp)
-                
-    graph.remove_nodes_from(nodes_to_remove)
+    graph.remove_edges_from(list(nx.selfloop_edges(graph, keys=True)))
+    pairs = {(min(u, v), max(u, v)) for u, v in graph.edges() if graph.number_of_edges(u, v) > 1}
+    for u, v in pairs:
+        keys = sorted(graph[u][v], key=lambda key: graph[u][v][key]["length"], reverse=True)
+        graph.remove_edges_from([(u, v, key) for key in keys[1:]])
+    remove_degree_two_nodes(graph, keep_rings=False)
 
 def refine_graph(
         condensed_graph: nx.MultiGraph,
         bin_img: np.ndarray,
-        bulge_len_threshold: float = 4.0,
-        bulge_size_threshold: float = 0.0,
-        bulge_ratio_threshold: float = 0.0,
-        elongation_threshold: float = 0.0,
-        multi_edge_threshold: float | None = 0.0, 
-        self_loop_threshold: float | None = 0.0, 
-        bridge_radius_ratio_threshold: float = 0.5,
-        bridge_length_threshold: float = 3.0,
-        collapse_length_ratio_threshold: float = 1.0,
-        comp_size_threshold: int = 0, 
-        comp_length_threshold: float = 1.0, 
+        spur_reach: float = SPUR_REACH,
+        junction_reach: float = JUNCTION_REACH,
+        tunnel_width: float = TUNNEL_WIDTH,
         keep_rings: bool = True,
         step_callback: Callable[[str, nx.MultiGraph, bool, list[np.ndarray]], None] | None = None,
         edt_bg: np.ndarray | None = None,
+        radius_map: np.ndarray | None = None,
         ) -> tuple[nx.MultiGraph, np.ndarray, list[np.ndarray]]:
-    """Simplifies the graph topology iteratively until stable. 
-    
-    The function has many threshold parameters setting the heuristics for graph refinement. Most
-    of them are optional. bulge_len_threshold is usually the most important. It sets the maximum 
-    allowed bulge length for leaf branches. 
+    """Simplifies the skeleton graph with one decision per structure type, until stable.
 
-    Pruning thresholds (bulge_*_threshold and elongation_threshold):
-    These thresholds are applied for removing leaf branches that are likely to be artifacts. 
-    The bulge length is defined as the numerator of the bulge_size equation in [1]. The bulge size 
-    is given by bulge_len / mean_radius, where mean_radius is the average radius of the branch. 
-    The bulge ratio is given by bulge_len / r_parent, where r_parent is the radius of the parent 
-    vessel of the branch at the branching point.
-    The elongation is given by the outer length (defined in [1]) divided by 2x the mean radius. 
+    Every distance is relative to the vessel radius (``label_geometry.vessel_radius``: the
+    in-plane distance to the background in 3D, the distance transform in 2D), so the same
+    values work at any voxel size. Each knob trades precision and recall for one structure
+    type; a value of 0 turns its step off:
 
-    Graph cleaning thresholds (multi_edge_threshold, self_loop_threshold, comp_size_threshold, 
-    comp_length_threshold):
-    These thresholds are applied for removing multi-edges, self-loops, and small components.
-    
-    Bridge and crossing thresholds (bridge_radius_ratio_threshold, bridge_length_threshold, 
-    collapse_length_ratio_threshold):
-    These thresholds are applied for identifying and removing false anastomoses (H-bridges), 
-    which are two unrelated but close vessels that end up connected by a short edge, and for
-    collapsing X crosses that usually become two nodes connected by a short edge due to how
-    skeletonization works. 
+    - ``spur_reach`` (leaves, ``guided.prune_leaves``): a leaf branch is removed if it
+      reaches less than this many parent radii out of its parent vessel in the image plane.
+      In 3D, a leaf is kept anyway if a tip of the graph of the label projected along z
+      matches it (a real end pointing along z) or if it ends on the top or bottom face.
+      Higher: fewer spurs, more short real branches lost.
+    - ``junction_reach`` (split junctions, ``collapse_internal_bridges``): two junctions
+      joined by an edge shorter than this many times the sum of their radii are merged.
+      Higher: fewer junctions split in two, more close real junctions merged.
+    - ``tunnel_width`` (tunnels, ``merge_tunnels``): edges between the same nodes (or the two
+      halves of a self-loop) that stay within this many local label widths of each other run
+      around a hole in the label and are merged into one. Higher: fewer label holes, more
+      tight real loops and touching vessels merged.
+
+    Thin, short bridges between two vessels (contacts) are always removed
+    (``remove_false_anastomoses`` with its default thresholds).
+
+    The defaults were chosen on synthetic stacks with ground truth (widefield 10x and 20x,
+    confocal 10x; exact masks and labels made like the real ones): the heuristics that did not
+    improve the graphs were removed, and the knob values minimize the error of the
+    branch-point and length densities. For labels that are thick relative to the vessels and
+    little blurred along z (e.g. widefield 20x), a lower ``junction_reach`` (0.5-1) was
+    better.
 
     Args:
         condensed_graph: The initial graph to be refined.
         bin_img: The original binary image, used for EDT calculations.
-        bulge_len_threshold: Min allowed bulge length for leaf branches.
-        bulge_size_threshold: Min allowed bulge size for leaf branches.
-        bulge_ratio_threshold:  Min allowed bulge ratio for leaf branches.
-        elongation_threshold: Min allowed elongation for leaf branches.
-        multi_edge_threshold: When two nodes have multiple edges between them, edges smaller than 
-            this threshold are removed, unless all edges are smaller than the threshold, in which 
-            case the largest edge is kept. Set to None to remove all multiedges, which is useful for
-            constructing a simple graph when necessary.
-        self_loop_threshold: Self-loops smaller than this threshold are removed. Set to None to 
-            remove all self-loops.
-        bridge_radius_ratio_threshold: H-bridge removal. The bridge_radius_ratio is given by the
-            minimum radius of the bridge divided by the minimum radius of the two parent vessels.
-            Thus, thin bridges are candidates for removal.
-        bridge_length_threshold: H-bridge removal. Besides being thin, the bridge must also be 
-            smaller than this threshold to be removed.
-        collapse_length_ratio_threshold: X-cross collapse. If the edge length divided by the
-            sum of the radii of the connected nodes is smaller than this threshold, the edge is 
-            collapsed into a single node. Note that this transformation might have unintended 
-            consequences on the topology, so use with caution.
-        comp_size_threshold: Min number of nodes for a connected component to be kept.
-        comp_length_threshold: Min total edge length for a component to be kept.
-        keep_rings: Whether to preserve pure ring structures (degree 2 nodes with a single 
-            self-loop). Note that comp_*_threshold can also remove rings and have precedence over 
-            this parameter.
+        spur_reach: Leaves (see above), in parent radii.
+        junction_reach: Split junctions (see above), in sums of the two junction radii.
+        tunnel_width: Tunnels (see above), in local label widths.
+        keep_rings: Whether to preserve pure ring structures (degree 2 nodes with a single
+            self-loop).
         step_callback: Optional function called after every step as
             ``step_callback(step, graph, changed, trash_paths)``, where ``step`` is one of
-            "degree_two", "multi_edges", "self_loops", "false_anastomoses", "prune",
-            "collapse" and "components". It is meant for inspection and testing (e.g.
-            checking the graph with ``pyvane.graph.validate.check_graph``); it must not modify
-            the graph.
+            "degree_two", "false_anastomoses", "leaves", "collapse" and "tunnels". It is meant
+            for inspection and testing (e.g. checking the graph with
+            ``pyvane.graph.validate.check_graph``); it must not modify the graph.
         edt_bg: Optional precomputed ``distance_transform_edt(bin_img)``, to save its
             computation when the same image is refined several times.
+        radius_map: Optional precomputed ``label_geometry.vessel_radius_map(bin_img)``, for
+            the same reason.
 
-    References:
-    [1] Drees, Dominik, et al. "Scalable robust graph and feature extraction for arbitrary vessel 
-    networks in large volumetric datasets." BMC bioinformatics 22.1 (2021): 346.
+    Returns:
+        The refined graph, the distance transform of the background and the paths removed
+        (outside the junction spheres), for ``map_foreground_to_graph``.
     """
+    # Imported here because pyvane.graph.guided imports this module
+    from pyvane.graph.guided import projection_guide, prune_leaves
+
     graph = condensed_graph.copy()
+    bin_img = np.asarray(bin_img, bool)
+    is_2d = graph.graph.get("is_2d", False) or bin_img.ndim == 2
 
     if edt_bg is None:
         edt_bg = distance_transform_edt(bin_img)
+    if radius_map is None:
+        radius_map = vessel_radius_map(bin_img)
+    guide = projection_guide(bin_img) if spur_reach > 0 and not is_2d else None
+    elongation = 1.0
+    if tunnel_width > 0 and not is_2d:
+        path_voxels = [np.asarray(d["path"], int).reshape(-1, 3)
+                       for *_, d in graph.edges(data=True)]
+        skeleton_voxels = np.vstack(path_voxels) if path_voxels else np.zeros((0, 3), int)
+        elongation = label_elongation(bin_img, radius_map, skeleton_voxels)
     # Keep track of pixels from paths that are removed.
     global_trash_paths = []
 
@@ -806,54 +581,29 @@ def refine_graph(
             topology_changed = True
         notify("degree_two", changed, [])
 
-        changed, trash = resolve_multi_edges(graph, edt_bg, multi_edge_threshold)
-        if changed:
-            global_trash_paths.extend(trash)
-            topology_changed = True
-        notify("multi_edges", changed, trash)
-            
-        changed, trash = resolve_self_loops(graph, edt_bg, self_loop_threshold)
-        if changed:
-            global_trash_paths.extend(trash)
-            topology_changed = True
-        notify("self_loops", changed, trash)
-
-        changed, trash = remove_false_anastomoses(
-            graph, 
-            edt_bg, 
-            radius_ratio_threshold = bridge_radius_ratio_threshold, 
-            length_threshold = bridge_length_threshold
-            )
+        changed, trash = remove_false_anastomoses(graph, edt_bg, radius_map)
         if changed:
             global_trash_paths.extend(trash)
             topology_changed = True
         notify("false_anastomoses", changed, trash)
 
-        changed, trash = prune_branches(
-            graph, 
-            edt_bg=edt_bg, 
-            bulge_len_threshold = bulge_len_threshold, 
-            bulge_size_threshold = bulge_size_threshold,
-            bulge_ratio_threshold = bulge_ratio_threshold,
-            elongation_threshold = elongation_threshold,
-            )
-        if changed:
-            global_trash_paths.extend(trash)
-            topology_changed = True
-        notify("prune", changed, trash)
+        if spur_reach > 0:
+            changed, trash = prune_leaves(graph, edt_bg, radius_map, guide,
+                                          spur_reach=spur_reach, keep_rings=keep_rings)
+            if changed:
+                global_trash_paths.extend(trash)
+                topology_changed = True
+            notify("leaves", changed, trash)
 
-        changed = collapse_internal_bridges(
-            graph, 
-            edt_bg, 
-            collapse_length_ratio_threshold = collapse_length_ratio_threshold
-            )
+        changed = collapse_internal_bridges(graph, radius_map, junction_reach)
         if changed:
             topology_changed = True
         notify("collapse", changed, [])
 
-    n_before = graph.number_of_nodes()
-    filter_components(graph, comp_size_threshold, comp_length_threshold)
-    notify("components", graph.number_of_nodes() != n_before, [])
+        changed, trash = merge_tunnels(graph, edt_bg, radius_map, elongation, tunnel_width)
+        if changed:
+            global_trash_paths.extend(trash)
+            topology_changed = True
+        notify("tunnels", changed, trash)
 
     return graph, edt_bg, global_trash_paths
-

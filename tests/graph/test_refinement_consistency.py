@@ -9,13 +9,14 @@ import networkx as nx
 import numpy as np
 import pytest
 
+from pyvane.graph.guided import prune_leaves
 from pyvane.graph.refinement import (
     collapse_internal_bridges,
-    prune_branches,
+    merge_tunnels,
     refine_graph,
     remove_degree_two_nodes,
-    resolve_multi_edges,
-    resolve_self_loops,
+    remove_false_anastomoses,
+    to_simple_graph,
 )
 from pyvane.graph.util import bresenham_3d, calculate_edge_lengths, find_inconsistent_edges
 
@@ -92,9 +93,12 @@ def test_other_heuristics_random(seed):
     g, edt = random_graph(seed)
     remove_degree_two_nodes(g)
     assert not find_inconsistent_edges(g)
-    resolve_multi_edges(g, edt, threshold=5.0)
-    resolve_self_loops(g, edt, threshold=5.0)
-    prune_branches(g, edt, bulge_len_threshold=5.0)
+    # the distance transform also serves as the radius map here
+    remove_false_anastomoses(g, edt, edt)
+    prune_leaves(g, edt, edt)
+    merge_tunnels(g, edt, edt, elongation=1.0)
+    assert not find_inconsistent_edges(g)
+    to_simple_graph(g)
     assert not find_inconsistent_edges(g)
 
 
