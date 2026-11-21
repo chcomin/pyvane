@@ -587,7 +587,6 @@ def create_graph(
     skel_img: np.ndarray, 
     bin_img: np.ndarray, 
     method: str = "refine",
-    length_threshold: float = 5.0,
     scaled_params: dict | None = None,
     keep_rings: bool = True, 
     full_output: bool = False,
@@ -611,7 +610,7 @@ def create_graph(
     desired, the user can call the individual functions separately and pass in custom parameters.
 
     Two methods are available for steps 2-3:
-    - ``"refine"`` (default): uses length thresholds to remove spurious edges. Please see
+    - ``"refine"`` (default): heuristics with thresholds relative to the vessel radius. Please see
       ``pyvane.graph.refinement.refine_graph`` for details on the refinement process. 
     - ``"scaled"``: ``pyvane.graph.scaled``. Every decision (spurs, junctions, label holes,
       crossings) is taken relative to the local vessel radius and to the label's elongation
@@ -631,17 +630,14 @@ def create_graph(
         skel_img: 2D or 3D binary array representing the skeletonized image.
         bin_img: 2D or 3D binary array representing the original foreground mask.
         method: "refine" or "scaled" (see above).
-        length_threshold: Minimum length for edges, in voxels, to be retained during refinement.
         scaled_params: Parameters of ``pyvane.graph.scaled.scaled_graph_from`` (e.g.
             ``{"tunnel_width": 3.0}``) for ``method="scaled"``; use defaults if None.
         keep_rings: Whether to keep pure rings (isolated loops) in the graph.
         full_output: If True, also returns the Euclidean distance transform and the list
             of paths removed during refinement.
         refine_params: For ``method="refine"``, parameters of
-            ``pyvane.graph.refinement.refine_graph`` that replace the values set by this
-            function. For example, all the optional steps with their recommended values:
-            ``{"z_spur_params": {}, "tunnel_width": 3.0, "crossing_angle": 150.0,
-            "crossing_collapse_ratio": 2.5}``.
+            ``pyvane.graph.refinement.refine_graph`` (in vessel radii); its defaults are used
+            for the others.
 
     Returns:
         The refined graph, or a tuple (graph, edt_bg, trash_paths) when ``full_output``
@@ -660,20 +656,6 @@ def create_graph(
         raise ValueError(f'Unknown method "{method}"; use "refine" or "scaled".')
     if scaled_params is not None:
         raise ValueError('scaled_params is only used with method="scaled".')
-    params = {
-        "bulge_len_threshold": length_threshold,
-        "bulge_size_threshold": 0.0,
-        "bulge_ratio_threshold": 0.0,
-        "elongation_threshold": 0.0,
-        "multi_edge_threshold": length_threshold,
-        "self_loop_threshold": length_threshold,
-        "bridge_radius_ratio_threshold": 0.5,
-        "bridge_length_threshold": 3.0,
-        "collapse_length_ratio_threshold": 1.0,
-        "comp_size_threshold": 0,
-        "comp_length_threshold": 1.0,
-    }
-    params.update(refine_params or {})
 
     # Create initial graph that represents all skeleton pixels as accurately as possible
     init_graph = graph_from_skeleton(skel_img, keep_rings = keep_rings)
@@ -683,7 +665,7 @@ def create_graph(
 
     # Refine the graph topology
     simple_graph, edt_bg, trash_paths = refine_graph(
-        cond_graph, bin_img, keep_rings=keep_rings, **params)
+        cond_graph, bin_img, keep_rings=keep_rings, **(refine_params or {}))
 
     assign_node_radii_and_outer_props(simple_graph, edt_bg)
     simple_graph.graph["method"] = "refine"
@@ -714,7 +696,6 @@ def create_graph_with_mapping(
     skel_img: np.ndarray, 
     bin_img: np.ndarray, 
     method: str = "refine",
-    length_threshold: float = 5.0,
     scaled_params: dict | None = None,
     edges_only: bool = True,
     keep_rings: bool = True,
@@ -730,7 +711,6 @@ def create_graph_with_mapping(
         skel_img: 2D or 3D binary array representing the skeletonized image.
         bin_img: 2D or 3D binary array representing the original foreground mask.
         method: Graph creation method, "refine" or "scaled" (see `create_graph`).
-        length_threshold: Minimum length for edges to be retained during refinement.
         scaled_params: Parameters of the "scaled" method (see `create_graph`).
         refine_params: Parameters of the "refine" method (see `create_graph`).
         edges_only: If True, pixels are only mapped to graph edges. If False, pixels are
@@ -750,7 +730,6 @@ def create_graph_with_mapping(
         skel_img = skel_img, 
         bin_img = bin_img,
         method = method,
-        length_threshold = length_threshold,
         scaled_params = scaled_params,
         keep_rings = keep_rings, 
         full_output = True,

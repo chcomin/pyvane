@@ -10,13 +10,10 @@ from pyvane.graph.refinement import refine_graph
 from pyvane.graph.validate import check_graph
 from pyvane.skeletonization import lee
 
-BASE = {"bulge_len_threshold": 5.0, "multi_edge_threshold": 5.0, "self_loop_threshold": 5.0}
-
-
 def _refine(img, **options):
     skeleton = lee.skeletonize(img, method="fixed")
     condensed = remove_clusters(graph_from_skeleton(skeleton))
-    graph, edt, _ = refine_graph(condensed, img, **{**BASE, **options})
+    graph, edt, _ = refine_graph(condensed, img, **options)
     return graph, edt
 
 
@@ -37,12 +34,14 @@ def _tube_with_hole(hole_width):
     return img
 
 
-@pytest.mark.parametrize("hole_width", [3, 5])
-def test_tunnel_around_a_hole_is_merged(hole_width):
+@pytest.mark.parametrize("hole_width, two_d", [(3, False), (5, False), (3, True)])
+def test_tunnel_around_a_hole_is_merged(hole_width, two_d):
     img = _tube_with_hole(hole_width)
-    default, _ = _refine(img)
-    assert _counts(default)["multi_pairs"] == 1
-    merged, _ = _refine(img, tunnel_width=2.0)
+    if two_d:
+        img = img[8]
+    kept, _ = _refine(img, multi_edge_threshold=0.0)
+    assert _counts(kept)["multi_pairs"] == 1
+    merged, _ = _refine(img, multi_edge_threshold=0.0, tunnel_width=2.0)
     assert _counts(merged) == {"branch_points": 0, "leaves": 2, "multi_pairs": 0,
                                "crossings": 0}
     assert check_graph(merged, img) == []
@@ -54,7 +53,7 @@ def test_real_loop_is_kept():
                 ((8, 25, 25), (8, 18, 45)), ((8, 18, 45), (8, 25, 65)),
                 ((8, 25, 25), (8, 32, 45)), ((8, 32, 45), (8, 25, 65))]
     img = draw((17, 50, 90), segments, 2)
-    graph, _ = _refine(img, tunnel_width=2.0)
+    graph, _ = _refine(img, multi_edge_threshold=0.0, tunnel_width=2.0)
     assert _counts(graph)["multi_pairs"] == 1
 
 
@@ -93,9 +92,9 @@ def _tall_t_with_bumps(scale=1):
 def test_z_spur_pruning_removes_the_spurs_and_keeps_the_branch(scale):
     # the distances are relative to the vessel radius: the same parameters work at any scale
     img = _tall_t_with_bumps(scale)
-    default, _ = _refine(img, bulge_len_threshold=5.0 * scale)
+    default, _ = _refine(img)
     assert _counts(default)["leaves"] > 3
-    pruned, _ = _refine(img, bulge_len_threshold=5.0 * scale, z_spur_params={})
+    pruned, _ = _refine(img, z_spur_params={})
     assert _counts(pruned)["branch_points"] == 1 and _counts(pruned)["leaves"] == 3
     assert check_graph(pruned, img) == []
 
@@ -115,21 +114,23 @@ def test_new_steps_are_reported_to_the_callback_and_off_by_default():
 def test_create_graph_passes_refine_params():
     img = _tube_with_hole(3)
     skeleton = lee.skeletonize(img, method="fixed")
-    default = create_graph(skeleton, img, length_threshold=5.0)
-    merged = create_graph(skeleton, img, length_threshold=5.0,
-                          refine_params={"tunnel_width": 2.0})
+    default = create_graph(skeleton, img, refine_params={"multi_edge_threshold": 0.0})
+    merged = create_graph(skeleton, img, refine_params={"multi_edge_threshold": 0.0,
+                                                        "tunnel_width": 2.0})
     assert _counts(default)["multi_pairs"] == 1 and _counts(merged)["multi_pairs"] == 0
     with pytest.raises(ValueError):
         create_graph(skeleton, img, method="scaled", refine_params={"tunnel_width": 2.0})
 
 
-def test_options_need_a_3d_image():
+def test_z_spur_pruning_is_skipped_in_2d():
     img = np.zeros((40, 40), bool)
     img[18:22, 5:35] = True
     skeleton = lee.skeletonize(img)
     condensed = remove_clusters(graph_from_skeleton(skeleton))
-    with pytest.raises(ValueError):
-        refine_graph(condensed, img, tunnel_width=2.0)
+    steps = []
+    refine_graph(condensed, img, z_spur_params={},
+                 step_callback=lambda step, *rest: steps.append(step))
+    assert "z_spurs" not in steps
 
 
 def test_crossing_at_different_depths_is_flagged():

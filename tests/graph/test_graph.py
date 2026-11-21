@@ -46,8 +46,6 @@ def check_graph_artifacts(graph, return_ids=True):
 
 def test_graph():
 
-    length_threshold = 5.0
-
     bin_img = np.array(Image.open(Path(__file__).parent / "12749_segmented.png"))
     skel_img = lee.skeletonize(bin_img)
 
@@ -56,14 +54,13 @@ def test_graph():
     simple_graph, edt_bg, trash_paths = refine_graph(
         cond_graph, 
         bin_img,
-        bulge_len_threshold = length_threshold,
+        bulge_ratio_threshold = 2.0,
         bulge_size_threshold = 0.0,
-        bulge_ratio_threshold = 0.0,
         elongation_threshold = 0.0,
         multi_edge_threshold = None, 
         self_loop_threshold = None, 
         bridge_radius_ratio_threshold = 0.5,
-        bridge_length_threshold = 3.0,
+        bridge_length_ratio_threshold = 1.0,
         collapse_length_ratio_threshold = 1.0,
         comp_size_threshold = 0, 
         comp_length_threshold = 1.0, 

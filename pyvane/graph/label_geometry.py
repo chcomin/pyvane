@@ -33,10 +33,27 @@ def inplane_edt(bin_img: np.ndarray) -> np.ndarray:
     return distances
 
 
-def inplane_radius(edt_xy: np.ndarray, voxel) -> float:
-    """In-plane radius (voxels) of the label at ``voxel``, between 1 and ``MAX_RADIUS``: the
-    unit of the distances that are relative to the vessel size."""
-    return min(max(float(edt_xy[tuple(np.asarray(voxel, int))]), 1.0), MAX_RADIUS)
+def vessel_radius_map(bin_img: np.ndarray) -> np.ndarray:
+    """Map of the vessel radius (voxels), the unit of the distances relative to the vessel size.
+
+    In 3D, the in-plane distance to the background (``inplane_edt``): axially blurred labels
+    are taller than wide, so the in-plane distance is the vessel radius. In 2D, the distance
+    transform of the background. Values are capped at ``MAX_RADIUS``.
+
+    Args:
+        bin_img: 2D or 3D binary image (z, y, x).
+    """
+    bin_img = np.asarray(bin_img, bool)
+    if bin_img.ndim == 3:
+        radii = inplane_edt(bin_img)
+    else:
+        radii = ndi.distance_transform_edt(bin_img).astype(np.float32)
+    return np.minimum(radii, np.float32(MAX_RADIUS))
+
+
+def vessel_radius(radius_map: np.ndarray, voxel) -> float:
+    """Vessel radius (voxels) at ``voxel`` from a ``vessel_radius_map``, at least 1."""
+    return min(max(float(radius_map[tuple(np.asarray(voxel, int))]), 1.0), MAX_RADIUS)
 
 
 def half_height(bin_img: np.ndarray, voxel) -> float:
@@ -82,11 +99,14 @@ def paths_close(path_a: np.ndarray, path_b: np.ndarray, edt_xy: np.ndarray,
     """Whether two paths stay within ``width`` local label widths of each other.
 
     The local label width is 2 x the in-plane distance to the background + 1 voxel, taken at
-    each point; z distances are divided by ``elongation``.
+    each point of ``edt_xy`` (in 2D, the distance transform); in 3D, z distances are divided
+    by ``elongation``.
     """
     if len(path_a) == 0 or len(path_b) == 0:
         return True
-    scale = np.array([1.0 / elongation, 1.0, 1.0])
+    scale = np.ones(edt_xy.ndim)
+    if edt_xy.ndim == 3:
+        scale[0] = 1.0 / elongation
     for path, other_path in ((path_a, path_b), (path_b, path_a)):
         distances, _ = cKDTree(other_path * scale).query(path * scale)
         inplane_radii = np.minimum(edt_xy[tuple(np.asarray(path, int).T)], MAX_RADIUS)

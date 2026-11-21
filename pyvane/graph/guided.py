@@ -20,9 +20,8 @@ The method was developed for confocal stacks of cortical capillaries
 (``context/pyvane_handoff/guided_pruning`` in the analysis that introduced it), with distances
 in voxels. Here every distance is relative to the vessel size, as in ``pyvane.graph.scaled``:
 the unit of a leaf branch is the in-plane radius of the label at its parent junction
-(``label_geometry.inplane_radius``), and the unit of the projected graph is the median radius
-of the projected label. The default values were chosen on synthetic stacks with ground truth (widefield 10x and 20x,
-confocal 10x; exact masks and realistic labels). Arrays are indexed (z, y, x).
+(``label_geometry.vessel_radius``), and the unit of the projected graph is the radius of the
+projected label. Arrays are indexed (z, y, x).
 """
 
 from typing import NamedTuple
@@ -33,7 +32,7 @@ from scipy.spatial import cKDTree
 
 from scipy.ndimage import distance_transform_edt
 
-from pyvane.graph.label_geometry import inplane_radius
+from pyvane.graph.label_geometry import vessel_radius
 from pyvane.graph.refinement import _extract_trash_path, remove_degree_two_nodes
 
 
@@ -70,37 +69,38 @@ def _branch_end(graph: nx.MultiGraph, tip, parent, data: dict,
     return tip_position, (direction / norm if norm else direction)
 
 
-def projection_guide(bin_img: np.ndarray, length_threshold_2d: float = 1.0,
+def projection_guide(bin_img: np.ndarray, prune_ratio_2d: float = 1.0,
                      direction_length: float = 3.0) -> ProjectionGuide:
     """Tips of the graph of the label projected along z (a pixel is foreground if any voxel
     of its column is).
 
     Args:
         bin_img: 3D binary image (z, y, x).
-        length_threshold_2d: ``length_threshold`` of ``create_graph`` for the projected graph,
-            which removes the pixel noise of the 2D skeleton, in units of the median radius
-            of the projected label at its skeleton.
+        prune_ratio_2d: Pruning of the projected graph, which removes the pixel noise of the
+            2D skeleton: ``bulge_ratio_threshold`` of ``refine_graph`` (leaf branches reaching
+            less than this many parent radii are removed); the other ``refine_graph``
+            parameters keep their defaults.
         direction_length: Length of the branch end used for its direction, in units of the
             radius of the projected label at the branch's parent node.
     """
     # Imported here because pyvane.graph.creation imports pyvane.graph.refinement
-    from pyvane.graph.creation import create_graph
+    from pyvane.graph.creation import graph_from_skeleton, remove_clusters
+    from pyvane.graph.refinement import refine_graph
     from pyvane.skeletonization import lee
 
     projection = np.asarray(bin_img, bool).any(axis=0)
     skeleton_2d = lee.skeletonize(projection.astype(np.uint8))
     edt_2d = distance_transform_edt(projection)
-    skeleton_radii = edt_2d[skeleton_2d > 0]
-    median_radius = max(float(np.median(skeleton_radii)), 1.0) if len(skeleton_radii) else 1.0
-    graph_2d = create_graph(skeleton_2d, projection,
-                            length_threshold=length_threshold_2d * median_radius)
+    condensed_2d = remove_clusters(graph_from_skeleton(skeleton_2d))
+    graph_2d, _, _ = refine_graph(condensed_2d, projection, edt_bg=edt_2d,
+                                  bulge_ratio_threshold=prune_ratio_2d)
     positions, directions = [], []
     for node in graph_2d.nodes:
         if graph_2d.degree(node) != 1:
             continue
         ((u, v, data),) = graph_2d.edges(node, data=True)
         parent = v if u == node else u
-        parent_radius = inplane_radius(edt_2d, graph_2d.nodes[parent]["center"])
+        parent_radius = vessel_radius(edt_2d, graph_2d.nodes[parent]["center"])
         position, direction = _branch_end(graph_2d, node, parent, data,
                                           direction_length * parent_radius)
         positions.append(position)
@@ -119,12 +119,12 @@ def _junction_leaves(graph: nx.MultiGraph) -> list[tuple]:
     return leaves
 
 
-def _parent_radius(graph: nx.MultiGraph, parent, edt_xy: np.ndarray) -> float:
+def _parent_radius(graph: nx.MultiGraph, parent, radius_map: np.ndarray) -> float:
     """Distance unit of a leaf branch: the in-plane radius at its parent junction."""
-    return inplane_radius(edt_xy, graph.nodes[parent]["center"])
+    return vessel_radius(radius_map, graph.nodes[parent]["center"])
 
 
-def _match_tips(graph: nx.MultiGraph, edt_xy: np.ndarray, guide: ProjectionGuide,
+def _match_tips(graph: nx.MultiGraph, radius_map: np.ndarray, guide: ProjectionGuide,
                 kept_tips: set, claimed_guide_tips: set, match_distance: float,
                 direction_length: float) -> None:
     """Matches the leaf branches not kept yet to the guide tips not claimed yet, greedily,
@@ -134,7 +134,7 @@ def _match_tips(graph: nx.MultiGraph, edt_xy: np.ndarray, guide: ProjectionGuide
     leaves = [leaf for leaf in _junction_leaves(graph) if leaf[0] not in kept_tips]
     if not leaves or not len(guide.tip_positions):
         return
-    radii = np.array([_parent_radius(graph, parent, edt_xy) for _, parent, _ in leaves])
+    radii = np.array([_parent_radius(graph, parent, radius_map) for _, parent, _ in leaves])
     ends = [_branch_end(graph, tip, parent, data, direction_length * radius)
             for (tip, parent, data), radius in zip(leaves, radii)]
     leaf_positions = np.array([position for position, _ in ends])
@@ -154,18 +154,18 @@ def _match_tips(graph: nx.MultiGraph, edt_xy: np.ndarray, guide: ProjectionGuide
             claimed_guide_tips.add(j)
 
 
-def _xy_reach(graph: nx.MultiGraph, tip, parent, data: dict, edt_xy: np.ndarray) -> float:
+def _xy_reach(graph: nx.MultiGraph, tip, parent, data: dict, radius_map: np.ndarray) -> float:
     """How far a leaf branch reaches out of its parent vessel in XY (voxels): the largest XY
     distance of its points to the parent center, minus the parent radius, plus the tip radius
     (pyvane's bulge length, measured in XY). Radii are in-plane radii at the node centers."""
     points = _points_from(graph, parent, tip, data)
     reach = np.hypot(*(points[:, 1:] - points[0, 1:]).T).max()
-    parent_radius = _parent_radius(graph, parent, edt_xy)
-    tip_radius = inplane_radius(edt_xy, graph.nodes[tip]["center"])
+    parent_radius = _parent_radius(graph, parent, radius_map)
+    tip_radius = vessel_radius(radius_map, graph.nodes[tip]["center"])
     return float(reach - parent_radius + tip_radius)
 
 
-def prune_z_spurs(graph: nx.MultiGraph, edt_bg: np.ndarray, edt_xy: np.ndarray,
+def prune_z_spurs(graph: nx.MultiGraph, edt_bg: np.ndarray, radius_map: np.ndarray,
                   guide: ProjectionGuide, match_distance: float = 3.0, xy_keep: float = 4.0,
                   direction_length: float = 3.0, face_distance: float = 0.0,
                   keep_rings: bool = True) -> tuple[bool, list[np.ndarray]]:
@@ -186,7 +186,7 @@ def prune_z_spurs(graph: nx.MultiGraph, edt_bg: np.ndarray, edt_xy: np.ndarray,
     Args:
         graph: Graph to modify in place.
         edt_bg: Euclidean distance transform of the background (3D), for the removed paths.
-        edt_xy: In-plane distance transform (``label_geometry.inplane_edt``).
+        radius_map: ``label_geometry.vessel_radius_map`` of the binary image.
         guide: ``projection_guide`` of the binary image the graph was made from.
         match_distance: Largest XY distance between a leaf tip and its guide tip.
         xy_keep: Leaves reaching at least this far out of their parent in XY are kept;
@@ -206,14 +206,14 @@ def prune_z_spurs(graph: nx.MultiGraph, edt_bg: np.ndarray, edt_xy: np.ndarray,
     trash_paths = []
     changed = False
     while True:
-        _match_tips(graph, edt_xy, guide, kept_tips, claimed_guide_tips, match_distance,
+        _match_tips(graph, radius_map, guide, kept_tips, claimed_guide_tips, match_distance,
                     direction_length)
         edges_to_delete = []
         for node in list(graph.nodes):
             if graph.degree(node) <= 2:
                 continue
             incident_edges = list(graph.edges(node, keys=True, data=True))
-            radius = _parent_radius(graph, node, edt_xy)
+            radius = _parent_radius(graph, node, radius_map)
             removable = []      # (length, tip, u, v, key)
             for u, v, key, data in incident_edges:
                 tip = v if u == node else u
@@ -223,7 +223,7 @@ def prune_z_spurs(graph: nx.MultiGraph, edt_bg: np.ndarray, edt_xy: np.ndarray,
                 if (tip_z <= face_distance * radius
                         or tip_z >= depth - 1 - face_distance * radius):
                     continue
-                if _xy_reach(graph, tip, node, data, edt_xy) >= xy_keep * radius:
+                if _xy_reach(graph, tip, node, data, radius_map) >= xy_keep * radius:
                     continue
                 removable.append((data["length"], tip, u, v, key))
             if not removable:

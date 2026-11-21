@@ -29,9 +29,7 @@ def test_step_callback_reports_every_step_and_the_graph_stays_valid():
         # between steps degree-2 nodes may exist (they are merged at the start of each pass)
         assert check_graph(graph, bin_img, allow_degree_two=True, min_inside=0.0) == []
 
-    graph, _, trash = refine_graph(cond, bin_img, bulge_len_threshold=5.0,
-                                   multi_edge_threshold=5.0, self_loop_threshold=5.0,
-                                   step_callback=cb)
+    graph, _, trash = refine_graph(cond, bin_img, step_callback=cb)
     names = [c[0] for c in calls]
     assert names[:6] == STEPS and names[-1] == "components"
     n_pass = (len(names) - 1) // len(STEPS)
@@ -44,9 +42,8 @@ def test_step_callback_reports_every_step_and_the_graph_stays_valid():
 
 def test_callback_does_not_change_the_result():
     bin_img, cond = _condensed()
-    a, _, _ = refine_graph(cond, bin_img, bulge_len_threshold=5.0)
-    b, _, _ = refine_graph(cond, bin_img, bulge_len_threshold=5.0,
-                           step_callback=lambda *args: None)
+    a, _, _ = refine_graph(cond, bin_img)
+    b, _, _ = refine_graph(cond, bin_img, step_callback=lambda *args: None)
 
     def summary(g):
         nodes = {n: tuple(c) for n, c in g.nodes(data="center")}

@@ -92,9 +92,10 @@ def test_other_heuristics_random(seed):
     g, edt = random_graph(seed)
     remove_degree_two_nodes(g)
     assert not find_inconsistent_edges(g)
-    resolve_multi_edges(g, edt, threshold=5.0)
-    resolve_self_loops(g, edt, threshold=5.0)
-    prune_branches(g, edt, bulge_len_threshold=5.0)
+    # the distance transform also serves as the radius map here
+    resolve_multi_edges(g, edt, edt, threshold=2.0)
+    resolve_self_loops(g, edt, edt, threshold=2.0)
+    prune_branches(g, edt, edt, bulge_ratio_threshold=2.0)
     assert not find_inconsistent_edges(g)
 
 
