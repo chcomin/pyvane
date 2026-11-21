@@ -635,8 +635,8 @@ def create_graph(
       radii out of its parent in the image plane; in 3D, leaves matching a tip of the graph of
       the label projected along z, or ending on the top or bottom face, are kept.
       scaled (default "auto"): a leaf branch is removed if it stays inside its junction's
-      ellipsoid scaled by this; "auto" sets it from the label elongation e (1.25 + 0.2 (e - 1))
-      and "z_excess" searches it per image.
+      ellipsoid scaled by this value; "auto" sets it from the label elongation e
+      (1.25 + 0.2 (e - 1)) and "z_excess" searches it per image.
     - ``junction_reach`` (split junctions).
       refine (default 1.5): junctions joined by an edge shorter than this times the sum of
       their radii are merged.
