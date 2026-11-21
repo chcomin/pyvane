@@ -12,6 +12,6 @@ authors:
 - family-names: "Lacoste"
   given-names: "Baptiste"
 title: "Unbiased analysis of mouse brain endothelial networks from two-or three-dimensional fluorescence images"
-version: 1.0.0
+version: 2.0.0
 date-released: 2026-07-15
 doi: 10.1117/1.NPh.9.3.031916
