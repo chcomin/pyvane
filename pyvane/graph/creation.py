@@ -662,7 +662,12 @@ def create_graph(
     widefield 20x) did better with a lower ``junction_reach`` (0.5-1).
 
     In both cases, nodes get ``radius`` and edges ``trim_amount`` and ``outer_length``
-    attributes. ``graph.graph["method"]`` records the method and ``graph.graph["params"]`` the
+    attributes. Vessels cut by the XY faces of the image are marked: leaf tips whose mask
+    reaches an XY face get ``border=True`` and are moved to the face, and edges get
+    ``border_fraction``, the fraction of their path where the mask reaches an XY face
+    (``pyvane.graph.border``). Whether a border leaf is a vessel leaving the image or an
+    artifact on a vessel that touches the face cannot be told from the image.
+    ``graph.graph["method"]`` records the method and ``graph.graph["params"]`` the
     knob values used (with "auto" resolved).
 
     Note: An isotropic image is assumed.

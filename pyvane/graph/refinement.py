@@ -6,6 +6,7 @@ import networkx as nx
 import numpy as np
 from scipy.ndimage import distance_transform_edt
 
+from pyvane.graph.border import mark_border
 from pyvane.graph.label_geometry import (
     label_elongation,
     paths_close,
@@ -518,6 +519,15 @@ def refine_graph(
     Thin, short bridges between two vessels (contacts) are always removed
     (``remove_false_anastomoses`` with its default thresholds).
 
+    Vessels cut by the XY faces of the image (``pyvane.graph.border``): the thinning stops the
+    skeleton up to one radius before the face, so a cut vessel can look like a short leaf.
+    Leaf branches whose mask reaches an XY face and whose end points to it are not removed by
+    the leaf rule, since they may be vessels leaving the image. At the end, every leaf tip
+    whose mask reaches an XY face gets ``border=True`` (other nodes ``border=False``) and is
+    moved to the face, its path extended by the straight segment; every edge gets
+    ``border_fraction``, the fraction of its path where the mask reaches an XY face. The z
+    faces are not treated this way.
+
     The defaults were chosen on synthetic stacks with ground truth (widefield 10x and 20x,
     confocal 10x; exact masks and labels made like the real ones): the heuristics that did not
     improve the graphs were removed, and the knob values minimize the error of the
@@ -606,4 +616,5 @@ def refine_graph(
             topology_changed = True
         notify("tunnels", changed, trash)
 
+    mark_border(graph, radius_map)
     return graph, edt_bg, global_trash_paths

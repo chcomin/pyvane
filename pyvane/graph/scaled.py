@@ -54,6 +54,7 @@ import numpy as np
 from scipy import ndimage as ndi
 from scipy.spatial import cKDTree
 
+from pyvane.graph.border import is_border_leaf, mark_border
 from pyvane.graph.creation import graph_from_skeleton, remove_clusters
 from pyvane.graph.refinement import (
     _bridge_from_center,
@@ -220,6 +221,8 @@ def prune_spurs(graph: nx.MultiGraph, prep: ScaledInput, spur_reach: float = 1.2
             for u, v, key, data in graph.edges(node, keys=True, data=True):
                 other = v if u == node else u
                 if other != node and graph.degree(other) == 1:
+                    if is_border_leaf(graph, other, node, data, prep.edt_xy):
+                        continue        # possibly a vessel leaving the image
                     extent = _leaf_extent(graph, node, other, data, axes)
                     leaves.append((extent, u, v, key))
             spurs = [leaf for leaf in leaves if leaf[0] <= 1.0]
@@ -475,7 +478,10 @@ def merge_junction_regions(graph: nx.MultiGraph, prep: ScaledInput,
         spurs, not_spurs = [], []
         for exit_ in exits:
             is_spur = (exit_.exit_point is None and graph.degree(exit_.far_node) == 1
-                       and exit_.extent <= spur_extent)
+                       and exit_.extent <= spur_extent
+                       and not is_border_leaf(graph, exit_.far_node, exit_.member,
+                                              graph[exit_.member][exit_.far_node][exit_.key],
+                                              prep.edt_xy))
             (spurs if is_spur else not_spurs).append(exit_)
         stats["spurs"] += len(spurs)
         kept, tunnel_paths = _merge_tunnels(not_spurs, prep.edt, prep.edt_xy, elongation,
@@ -578,6 +584,7 @@ def scaled_graph_from(prep: ScaledInput, spur_reach: float | str = DEFAULTS["spu
                          or counts["spurs"] or counts["internal_dropped"])
         if not graph_changed:
             break
+    mark_border(graph, prep.edt_xy)
     return graph, totals
 
 
