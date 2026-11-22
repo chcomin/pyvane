@@ -1,6 +1,8 @@
 _*
 .*
 !_*.py
+!_visual_checks/
+!_visual_checks/.gitignore
 ___*.py  
 results/
 *.pdn
