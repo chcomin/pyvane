@@ -507,8 +507,10 @@ def refine_graph(
       reaches less than this many parent radii out of its parent vessel in the image plane
       (from the parent centerline, in units of the mean radius along it). In 3D, a leaf is
       kept anyway if a tip of the graph of the label projected along z (pruned with the same
-      ``spur_reach``) matches it, or if it ends on the top or bottom face.
-      Higher: fewer spurs, more short real branches lost.
+      ``spur_reach``) matches it, or if it ends on the top or bottom face. At the end, in
+      3D, the end of each leaf that runs off the vessel axis along z (onto the end cap of a
+      tall label) is cut, and leaves matched by a projected tip are extended in XY to it
+      (``guided.place_leaf_tips``). Higher: fewer spurs, more short real branches lost.
     - ``junction_reach`` (split junctions, ``collapse_internal_bridges``): two junctions
       joined by an edge shorter than this many times the sum of their radii are merged.
       Higher: fewer junctions split in two, more close real junctions merged.
@@ -559,7 +561,7 @@ def refine_graph(
         (outside the junction spheres), for ``map_foreground_to_graph``.
     """
     # Imported here because pyvane.graph.guided imports this module
-    from pyvane.graph.guided import projection_guide, prune_leaves
+    from pyvane.graph.guided import place_leaf_tips, projection_guide, prune_leaves
 
     graph = condensed_graph.copy()
     bin_img = np.asarray(bin_img, bool)
@@ -620,5 +622,7 @@ def refine_graph(
             topology_changed = True
         notify("tunnels", changed, trash)
 
+    if guide is not None:
+        place_leaf_tips(graph, radius_map, guide)
     mark_border(graph, radius_map)
     return graph, edt_bg, global_trash_paths

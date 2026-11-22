@@ -24,6 +24,12 @@ leaf branch is also kept if
 
 In 2D there is no projection: only the reach rule applies.
 
+In such tall labels the end cap of a vessel has a vertical medial sheet, so the skeleton tip of
+a vessel end stops short of it in XY, or climbs or dives along z (into a bump of the label
+surface). After the refinement, ``place_leaf_tips`` cuts the end of each leaf that runs off
+the vessel axis along z and, where a tip of the projected graph matches it, extends it in XY to
+that tip. Only the tips move; the topology does not change.
+
 The guided pruning was developed for confocal stacks of cortical capillaries
 (``context/pyvane_handoff/guided_pruning`` in the analysis that introduced it). Every distance
 is relative to the vessel size, as in ``pyvane.graph.scaled``: the unit of a leaf branch is
@@ -43,6 +49,7 @@ from scipy.spatial import cKDTree
 from pyvane.graph.border import is_border_leaf
 from pyvane.graph.label_geometry import vessel_radius
 from pyvane.graph.refinement import _extract_trash_path, remove_degree_two_nodes
+from pyvane.graph.util import bresenham_3d, compute_arc_length
 
 
 class ProjectionGuide(NamedTuple):
@@ -303,3 +310,122 @@ def prune_leaves(graph: nx.MultiGraph, edt_bg: np.ndarray, radius_map: np.ndarra
                 changed = True
         remove_degree_two_nodes(graph, keep_rings=keep_rings)
     return changed, trash_paths
+
+
+def _leaf_radius(points: np.ndarray, radius_map: np.ndarray) -> float:
+    """Mean in-plane radius along a leaf branch (its own vessel), at least 1."""
+    radii = radius_map[tuple(points.astype(int).T)]
+    radii = radii[radii > 0]
+    return max(float(radii.mean()), 1.0) if len(radii) else 1.0
+
+
+def _column_center(mask_column: np.ndarray, z: int) -> float:
+    """Middle of the run of foreground voxels along z that contains ``z``."""
+    bottom = z
+    while bottom > 0 and mask_column[bottom - 1]:
+        bottom -= 1
+    top = z
+    while top < len(mask_column) - 1 and mask_column[top + 1]:
+        top += 1
+    return (bottom + top) / 2
+
+
+def _off_axis_tail(points: np.ndarray, radius_map: np.ndarray, radius: float) -> int:
+    """Number of points at the end of a leaf branch (points from the parent center to the
+    tip) that lie more than ``radius`` off the vessel axis along z: the axis of a vessel in a
+    label taller than wide is at the middle of the label run along z of each column, and the
+    end of the skeleton climbs onto the end cap or a bump. The parent center and the first
+    path point are never counted."""
+    n_off = 0
+    for point in points[:1:-1]:
+        z, y, x = (int(round(value)) for value in point)
+        column = radius_map[:, y, x] > 0
+        if not column[z] or abs(z - _column_center(column, z)) <= radius:
+            break
+        n_off += 1
+    return n_off
+
+
+def place_leaf_tips(graph: nx.MultiGraph, radius_map: np.ndarray, guide: ProjectionGuide,
+                    match_distance: float = 3.0, direction_length: float = 3.0) -> None:
+    """Places the tips of the leaf branches of a 3D graph where the vessel ends (in place).
+
+    In labels taller than wide, the end cap of a vessel is a tall half-ellipsoid whose medial
+    axis is a vertical sheet. The thinning ends the skeleton somewhere on it: the tip stops
+    short of the vessel end in XY, or dives along z to the top or bottom of the label (more so
+    with a bump on the label surface near the end). The projected label has round end caps,
+    and the tips of its graph (the ``guide``) are where the vessels end in XY. For every leaf:
+
+    1. Its end points that lie more than one leaf radius off the vessel axis along z (the
+       middle of the label run along z of their column, ``_off_axis_tail``) are cut: the tip
+       moves back onto the axis.
+    2. If a guide tip matches it (within ``match_distance`` leaf radii in XY of the new tip,
+       ahead of it and pointing the same way, nearest first, one leaf per guide tip), the
+       tip moves to the guide tip, at the depth of the new tip, along the straight segment,
+       if the segment lies in the mask.
+
+    Distances are in units of the mean in-plane radius along the leaf. Only tips move: the
+    topology is not changed.
+
+    Args:
+        graph: Graph to modify in place.
+        radius_map: ``label_geometry.vessel_radius_map`` of the binary image.
+        guide: ``projection_guide`` of the binary image.
+        match_distance: Largest XY distance between a tip and its guide tip, in leaf radii.
+        direction_length: Length of the branch end used for its direction, in leaf radii.
+    """
+    leaves = []         # (tip, parent, key, points cut at the z tail, radius, n points cut)
+    for tip in [node for node in graph.nodes if graph.degree(node) == 1]:
+        ((u, v, key, data),) = graph.edges(tip, keys=True, data=True)
+        parent = v if u == tip else u
+        points = _points_from(graph, parent, tip, data)
+        radius = _leaf_radius(points, radius_map)
+        n_cut = _off_axis_tail(points, radius_map, radius)
+        leaves.append((tip, parent, key, points[:len(points) - n_cut], radius, n_cut))
+
+    candidates = []     # (distance, leaf index, guide index)
+    for i, (_, _, _, points, radius, _) in enumerate(leaves):
+        tip_xy = points[-1, -2:]
+        back = max(len(points) - 1 - round(direction_length * radius), 0)
+        direction = tip_xy - points[back, -2:]
+        for j, (guide_xy, guide_direction) in enumerate(
+                zip(guide.tip_positions, guide.tip_directions, strict=True)):
+            offset = guide_xy - tip_xy
+            distance = float(np.linalg.norm(offset))
+            if (distance <= match_distance * radius and direction @ guide_direction >= 0
+                    and offset @ direction >= 0):
+                candidates.append((distance, i, j))
+    targets: dict[int, np.ndarray] = {}
+    claimed: set = set()
+    for _, i, j in sorted(candidates):
+        if i not in targets and j not in claimed:
+            targets[i] = guide.tip_positions[j]
+            claimed.add(j)
+
+    for i, (tip, parent, key, _, _, n_cut) in enumerate(leaves):
+        if n_cut == 0 and i not in targets:
+            continue
+        # from the current path: when both ends of an edge are leaves, the other end may have
+        # changed already, and the two cuts must leave at least the two end points
+        current = _points_from(graph, parent, tip, graph[tip][parent][key])
+        points = current[:len(current) - min(n_cut, len(current) - 2)]
+        if i in targets:
+            end = points[-1].round().astype(np.int32)
+            new_tip = np.round([end[0], *targets[i]]).astype(np.int32)
+            segment = bresenham_3d(end, new_tip)
+            if np.all(radius_map[tuple(segment.T)] > 0):
+                points = np.vstack([points[:-1], segment])
+        _set_leaf_path(graph, tip, parent, key, points)
+
+
+def _set_leaf_path(graph: nx.MultiGraph, tip, parent, key, points: np.ndarray) -> None:
+    """Sets the tip center and the path of a leaf branch from its points (parent center to
+    tip center); paths are stored from the node of smaller index to the larger one."""
+    points = np.round(points).astype(np.int32)
+    data = graph[tip][parent][key]
+    path = points[1:-1]
+    if tip < parent:
+        path = path[::-1]
+    graph.nodes[tip]["center"] = points[-1]
+    data["path"] = np.ascontiguousarray(path)
+    data["length"] = float(compute_arc_length(data["path"], tip, parent, graph))

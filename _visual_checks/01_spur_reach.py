@@ -135,6 +135,29 @@ z_branches_results = report.sweep(z_branches_sample, "spur_reach", SPUR_VALUES,
 report.viewer(z_branches_sample, "3D round")
 
 # %% [markdown]
+# ## Vessel ends
+# Three vessels (radius 3) along x. In the elongated variant, each has bumps on its top and
+# bottom surfaces 2, 6 and 10 voxels from its left end, and none near its right end.
+#
+# **What to look for**
+# - The tips sit at the vessel ends in XY and at the axis depth in XZ (`guided.place_leaf_tips`).
+# - Elongated: without the tip placement, the thinning ends the skeleton on the tall end cap,
+#   short of the end in XY or climbing along z, and a bump near the end pulls the tip into it
+#   (a dive to the top or bottom of the label).
+
+# %%
+ends = Scene((17, 96, 112))
+for y in (16, 48, 80):
+    ends.tube((MID, y, 12), (MID, y, 100), PARENT_RADIUS)
+ends.bumps = [(16, 12 + 2), (48, 12 + 6), (80, 12 + 10)]
+ends_sample = Sample("vessel_ends", ends, "vessel ends with bumps 2-10 voxels away",
+                     expected={"all": {"branch_points": 0, "leaves": 6}})
+ends_results = report.sweep(ends_sample, "spur_reach", SPUR_VALUES)
+
+# %%
+report.viewer(ends_sample, "3D elongated")
+
+# %% [markdown]
 # ## Step trace
 # Counts after each refine step that changed the graph (default knobs), for the elongated
 # comb: which step removes the z-spurs, and whether a later step changes the result.

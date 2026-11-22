@@ -634,7 +634,8 @@ def create_graph(
       refine (default 2.5): a leaf branch is removed if it reaches less than this many parent
       radii out of its parent vessel in the image plane; in 3D, leaves matching a tip of the
       graph of the label projected along z (pruned with the same value), or ending on the top
-      or bottom face, are kept.
+      or bottom face, are kept, and the leaf tips are then placed on the vessel axis at the
+      vessel ends (``guided.place_leaf_tips``).
       scaled (default "auto"): a leaf branch is removed if it stays inside its junction's
       ellipsoid scaled by this value; "auto" sets it from the label elongation e
       (1.25 + 0.2 (e - 1)) and "z_excess" searches it per image.
