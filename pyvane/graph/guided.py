@@ -34,6 +34,7 @@ import numpy as np
 from scipy.ndimage import distance_transform_edt
 from scipy.spatial import cKDTree
 
+from pyvane.graph.border import is_border_leaf
 from pyvane.graph.label_geometry import vessel_radius
 from pyvane.graph.refinement import _extract_trash_path, remove_degree_two_nodes
 
@@ -181,9 +182,11 @@ def prune_leaves(graph: nx.MultiGraph, edt_bg: np.ndarray, radius_map: np.ndarra
        whose tip is the nearest in XY, within ``match_distance``, and whose end points the same
        way in XY. Matched leaves are kept for good.
     2. At every node of degree >= 3, the leaf branches that are not matched are removed if
-       they reach less than ``spur_reach`` out of their parent in the image plane, except (3D)
-       those whose tip is within ``face_distance`` of the top or bottom face. A node keeps at
-       least two edges (the longest leaves are kept for that).
+       they reach less than ``spur_reach`` out of their parent in the image plane, except
+       those that reach an XY face of the image and point to it (``border.is_border_leaf``:
+       possibly vessels leaving the image) and (3D) those whose tip is within
+       ``face_distance`` of the top or bottom face. A node keeps at least two edges (the
+       longest leaves are kept for that).
     3. Nodes of degree 2 are merged.
     Only leaf branches are removed.
 
@@ -232,6 +235,8 @@ def prune_leaves(graph: nx.MultiGraph, edt_bg: np.ndarray, radius_map: np.ndarra
                             or tip_z >= depth - 1 - face_distance * radius):
                         continue
                 if _xy_reach(graph, tip, node, data, radius_map) >= spur_reach * radius:
+                    continue
+                if is_border_leaf(graph, tip, node, data, radius_map):
                     continue
                 removable.append((data["length"], tip, u, v, key))
             if not removable:
