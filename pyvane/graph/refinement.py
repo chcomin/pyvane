@@ -22,7 +22,7 @@ from pyvane.graph.util import (
 from pyvane.util.misc import scalar
 
 # Defaults of the knobs, chosen on synthetic stacks with ground truth (see refine_graph)
-SPUR_REACH = 3.0
+SPUR_REACH = 2.5
 JUNCTION_REACH = 1.5
 TUNNEL_WIDTH = 3.0
 
@@ -504,9 +504,10 @@ def refine_graph(
     type; a value of 0 turns its step off:
 
     - ``spur_reach`` (leaves, ``guided.prune_leaves``): a leaf branch is removed if it
-      reaches less than this many parent radii out of its parent vessel in the image plane.
-      In 3D, a leaf is kept anyway if a tip of the graph of the label projected along z
-      matches it (a real end pointing along z) or if it ends on the top or bottom face.
+      reaches less than this many parent radii out of its parent vessel in the image plane
+      (from the parent centerline, in units of the mean radius along it). In 3D, a leaf is
+      kept anyway if a tip of the graph of the label projected along z (pruned with the same
+      ``spur_reach``) matches it, or if it ends on the top or bottom face.
       Higher: fewer spurs, more short real branches lost.
     - ``junction_reach`` (split junctions, ``collapse_internal_bridges``): two junctions
       joined by an edge shorter than this many times the sum of their radii are merged.
@@ -568,7 +569,10 @@ def refine_graph(
         edt_bg = distance_transform_edt(bin_img)
     if radius_map is None:
         radius_map = vessel_radius_map(bin_img)
-    guide = projection_guide(bin_img) if spur_reach > 0 and not is_2d else None
+    # the projected graph is pruned with the same spur_reach: a branch is a branch by its reach,
+    # whatever its direction
+    guide = (projection_guide(bin_img, prune_ratio_2d=spur_reach)
+             if spur_reach > 0 and not is_2d else None)
     elongation = 1.0
     if tunnel_width > 0 and not is_2d:
         path_voxels = [np.asarray(d["path"], int).reshape(-1, 3)

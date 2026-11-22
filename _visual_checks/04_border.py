@@ -28,7 +28,7 @@ from labels import Sample, Scene, side_branch  # noqa: E402
 from report import Report  # noqa: E402
 
 report = Report("04_border")
-SPUR_VALUES = [0, 3]
+SPUR_VALUES = [0, 2.5]
 MID = 8
 
 

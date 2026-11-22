@@ -1,15 +1,21 @@
 """Pruning of spurious leaf branches, guided in 3D by the graph of the label projected along z.
 
 A leaf branch is removed when it reaches less than ``spur_reach`` parent radii out of its
-parent vessel in the image plane (in 3D, in XY). This is the knob of the leaves: higher values
-remove more spurs and more short real branches.
+parent vessel in the image plane (in 3D, in XY). The reach is measured from the centerline of
+the parent vessel, not from the junction node: the node is the centroid of the junction's
+skeleton voxels, pulled off the vessel axis into the branch. For the same reason the parent
+radius is the mean radius along that centerline, not the radius at the node, which depends on
+where the node falls. This is the knob of the leaves: higher values remove more spurs and more
+short real branches.
 
 In 3D, with a low axial resolution (widefield or confocal 10x), vessels in the label are
 several times taller than wide. The skeleton of such a cross-section grows short branches
 towards the top and bottom of the vessel (z-spurs). Their 3D lengths overlap those of real
 branches, but their reach in XY is small. Real vessel ends that point along z are short in XY
 too; the projection of the label along z tells them apart: a real vessel end or branch is a tip
-of the projected graph, a z-spur is not. So, in 3D, a leaf branch is also kept if
+of the projected graph, a z-spur is not. The projected graph is pruned with the same
+``spur_reach``, so that a branch is judged by its reach whatever its direction. So, in 3D, a
+leaf branch is also kept if
 
 - a tip of the projected graph matches it (within ``match_distance`` in XY, pointing the same
   way in XY), or
@@ -21,10 +27,10 @@ In 2D there is no projection: only the reach rule applies.
 The guided pruning was developed for confocal stacks of cortical capillaries
 (``context/pyvane_handoff/guided_pruning`` in the analysis that introduced it). Every distance
 is relative to the vessel size, as in ``pyvane.graph.scaled``: the unit of a leaf branch is
-the vessel radius at its parent junction (``label_geometry.vessel_radius``), and the unit of
-the projected graph is the radius of the projected label. The default values were chosen on
-synthetic stacks with ground truth (widefield 10x and 20x, confocal 10x; exact masks and
-realistic labels). Arrays are indexed (z, y, x) or (y, x).
+the radius of its parent vessel (``label_geometry.vessel_radius_map``, in-plane in 3D), and
+the unit of the projected graph is the radius of the projected label. The default values were
+chosen on synthetic stacks with ground truth (widefield 10x and 20x, confocal 10x; exact masks
+and realistic labels). Arrays are indexed (z, y, x) or (y, x).
 """
 
 from typing import NamedTuple
@@ -79,10 +85,9 @@ def projection_guide(bin_img: np.ndarray, prune_ratio_2d: float = 1.0,
 
     Args:
         bin_img: 3D binary image (z, y, x).
-        prune_ratio_2d: Pruning of the projected graph, which removes the pixel noise of the
-            2D skeleton: ``spur_reach`` of ``refine_graph`` (leaf branches reaching less than
-            this many parent radii are removed); the other ``refine_graph`` parameters keep
-            their defaults.
+        prune_ratio_2d: Pruning of the projected graph: its ``spur_reach`` (leaf branches
+            reaching less than this many parent radii are removed); the other ``refine_graph``
+            parameters keep their defaults. ``refine_graph`` passes its own ``spur_reach``.
         direction_length: Length of the branch end used for its direction, in units of the
             radius of the projected label at the branch's parent node.
     """
@@ -122,8 +127,42 @@ def _junction_leaves(graph: nx.MultiGraph) -> list[tuple]:
     return leaves
 
 
+# Length of the parent vessel around a junction that gives its centerline and radius, beyond
+# the junction sphere, in junction radii
+PARENT_WINDOW = 3.0
+
+
+def _parent_vessel(graph: nx.MultiGraph, parent, radius_map: np.ndarray) -> np.ndarray:
+    """Centerline points of the parent vessel of the leaves of a junction: the path points of
+    its edges that are not leaf branches or self-loops, within ``PARENT_WINDOW`` junction radii
+    outside the junction sphere. Empty if the junction has no such edge."""
+    center = np.asarray(graph.nodes[parent]["center"], float)
+    junction_radius = vessel_radius(radius_map, center)
+    vessel_points = []
+    for u, v, data in graph.edges(parent, data=True):
+        other = v if u == parent else u
+        if other == parent or graph.degree(other) == 1:
+            continue
+        points = _points_from(graph, parent, other, data)[1:-1]
+        distances = np.linalg.norm(points - center, axis=1)
+        in_window = ((distances > junction_radius)
+                     & (distances <= (1 + PARENT_WINDOW) * junction_radius))
+        vessel_points.append(points[in_window])
+    if not vessel_points:
+        return np.zeros((0, len(center)))
+    return np.vstack(vessel_points)
+
+
 def _parent_radius(graph: nx.MultiGraph, parent, radius_map: np.ndarray) -> float:
-    """Distance unit of a leaf branch: the in-plane radius at its parent junction."""
+    """Distance unit of a leaf branch: the mean in-plane radius along its parent vessel
+    (``_parent_vessel``), or the in-plane radius at the junction center if the junction has no
+    parent vessel (only leaves and self-loops). The radius at the junction node is not the
+    vessel radius: the node lies off the vessel axis, inside the junction region."""
+    vessel_points = _parent_vessel(graph, parent, radius_map)
+    radii = radius_map[tuple(vessel_points.astype(int).T)]
+    radii = radii[radii > 0]
+    if len(radii):
+        return max(float(radii.mean()), 1.0)
     return vessel_radius(radius_map, graph.nodes[parent]["center"])
 
 
@@ -159,18 +198,24 @@ def _match_tips(graph: nx.MultiGraph, radius_map: np.ndarray, guide: ProjectionG
 
 def _xy_reach(graph: nx.MultiGraph, tip, parent, data: dict, radius_map: np.ndarray) -> float:
     """How far a leaf branch reaches out of its parent vessel in the image plane (voxels): the
-    largest in-plane distance of its points to the parent center, minus the parent radius,
-    plus the tip radius (the bulge length of Drees et al. 2021, measured in the plane). Radii
-    are vessel radii at the node centers."""
+    largest in-plane distance of its points to the parent centerline (``_parent_vessel``),
+    minus the parent radius (``_parent_radius``), plus the vessel radius at the tip (the bulge
+    length of Drees et al. 2021, measured in the plane). Without a parent vessel (a junction
+    of leaves and self-loops), the distance is taken to the junction center."""
     points = _points_from(graph, parent, tip, data)
-    reach = np.hypot(*(points[:, -2:] - points[0, -2:]).T).max()
+    vessel_points = _parent_vessel(graph, parent, radius_map)
+    if len(vessel_points):
+        # in-plane distance of each leaf point to the nearest point of the parent centerline
+        reach = cKDTree(vessel_points[:, -2:]).query(points[:, -2:])[0].max()
+    else:
+        reach = np.hypot(*(points[:, -2:] - points[0, -2:]).T).max()
     parent_radius = _parent_radius(graph, parent, radius_map)
     tip_radius = vessel_radius(radius_map, graph.nodes[tip]["center"])
     return float(reach - parent_radius + tip_radius)
 
 
 def prune_leaves(graph: nx.MultiGraph, edt_bg: np.ndarray, radius_map: np.ndarray,
-                 guide: ProjectionGuide | None = None, spur_reach: float = 3.0,
+                 guide: ProjectionGuide | None = None, spur_reach: float = 2.5,
                  match_distance: float = 3.0, direction_length: float = 3.0,
                  face_distance: float = 0.0,
                  keep_rings: bool = True) -> tuple[bool, list[np.ndarray]]:
