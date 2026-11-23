@@ -11,6 +11,13 @@ border points that are not end points and are simple; candidates are then delete
 sequentially after re-checking) but re-checks the end-point condition, together with
 simplicity, right before each deletion.
 
+Labels of axially blurred stacks are taller than wide. Thinned at the same speed from every
+side, such a label first becomes a vertical sheet, whose thinning ends on a curve set by the
+bumps and end caps of the label surface. With ``elongation`` e, the -z and +z sub-iterations
+run about e times per iteration, so the label is thinned as if its z coordinates were divided
+by e (as if it were round). Only the order of the deletions changes: every deletion is still
+simple on the original grid, so labels separated by a thin gap along z stay separate.
+
 A point is simple (26-connectivity for the object, 6-connectivity for the background) when its
 26-neighborhood contains exactly one 26-connected component of object points, and its
 18-neighborhood contains exactly one 6-connected component of background points 6-adjacent to
@@ -45,8 +52,9 @@ _ADJ26_PTR, _ADJ26 = _adjacency(26)
 _ADJ6_PTR, _ADJ6 = _adjacency(6)
 _IN_N18 = np.array([i != 13 and np.abs(_OFFSETS[i]).sum() <= 2 for i in range(27)])
 _IS_N6 = np.array([np.abs(_OFFSETS[i]).sum() == 1 for i in range(27)])
-# 6-neighbor index for each of the six thinning directions: -z, +z, -y, +y, -x, +x
-_DIRECTIONS = np.array([4, 22, 10, 16, 12, 14], np.int64)
+# 6-neighbor index for each thinning direction: -z, +z, then -y, +y, -x, +x
+_Z_DIRECTIONS = np.array([4, 22], np.int64)
+_XY_DIRECTIONS = np.array([10, 16, 12, 14], np.int64)
 
 
 @njit(cache=True, inline="always")
@@ -141,12 +149,23 @@ def _delete_sequentially(img, pts, flags, all_true, in_n18, is_n6, p26, a26, p6,
     return changed
 
 
-def skeletonize(image: np.ndarray) -> np.ndarray:
+def _directions(elongation: float, credit: float) -> tuple[list, float]:
+    """Directions of one iteration: the (-z, +z) pair ``elongation`` times on average (the
+    fraction is carried over in ``credit``), then -y, +y, -x, +x."""
+    credit += elongation
+    n_z = int(credit)
+    return [*_Z_DIRECTIONS] * n_z + [*_XY_DIRECTIONS], credit - n_z
+
+
+def skeletonize(image: np.ndarray, elongation: float = 1.0) -> np.ndarray:
     """Thins a 2D or 3D binary image to a one-voxel-wide skeleton, preserving the topology
     (26-connected object, 6-connected background) and the free ends of all branches.
 
     Args:
         image: Binary image (any dtype; nonzero is object).
+        elongation: 3D only: how many times taller than wide the label is along z; the label
+            is thinned as if its z coordinates were divided by it (see the module docstring).
+            1 thins at the same speed from every side.
 
     Returns:
         Boolean skeleton with the same shape.
@@ -155,24 +174,28 @@ def skeletonize(image: np.ndarray) -> np.ndarray:
     is_2d = img.ndim == 2
     if is_2d:
         img = img[None]
+        elongation = 1.0
     if img.ndim != 3:
         raise ValueError("image must be 2D or 3D")
+    if elongation < 1:
+        raise ValueError("elongation must be at least 1")
     work = np.pad(img, 1).astype(np.uint8)
     pts = np.argwhere(work).astype(np.int64)
     all_true = np.ones(27, np.bool_)
-    unchanged = 0
-    while unchanged < 6:
-        unchanged = 0
-        for d in _DIRECTIONS:
+    credit = 0.0
+    changed_in_iteration = True
+    while changed_in_iteration:
+        changed_in_iteration = False
+        directions, credit = _directions(elongation, credit)
+        for d in directions:
             flags = _candidates(work, pts, d, all_true, _IN_N18, _IS_N6, _ADJ26_PTR, _ADJ26,
                                 _ADJ6_PTR, _ADJ6, _OFFSETS)
             changed = 0
             if flags.any():
                 changed = _delete_sequentially(work, pts, flags, all_true, _IN_N18, _IS_N6,
                                                _ADJ26_PTR, _ADJ26, _ADJ6_PTR, _ADJ6)
-            if changed == 0:
-                unchanged += 1
-            else:
+            if changed:
+                changed_in_iteration = True
                 pts = pts[work[pts[:, 0], pts[:, 1], pts[:, 2]] != 0]
     out = work[1:-1, 1:-1, 1:-1].astype(bool)
     return out[0] if is_2d else out

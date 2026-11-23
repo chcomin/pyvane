@@ -62,3 +62,38 @@ def test_lee_wrapper_methods():
     assert lee.skeletonize(b, method="fixed").sum() >= 18
     with pytest.raises(ValueError):
         lee.skeletonize(b, method="other")
+
+
+def _tall_tube(z_center, elongation=4, shape=(48, 20, 80)):
+    """A tube along x (x 12-68 on its axis, radius 3), ``elongation`` times taller than wide."""
+    z, y, x = np.indices(shape).astype(float)
+    xc = np.clip(x, 12, 68)
+    return ((z - z_center) / elongation) ** 2 + (y - 10) ** 2 + (x - xc) ** 2 <= 9
+
+
+def test_elongation_puts_the_ends_of_a_tall_tube_on_its_axis():
+    tube = _tall_tube(24)
+    z, _, x = np.nonzero(skeletonize(tube))
+    assert np.abs(z - 24).max() >= 6 and x.min() >= 18   # without: climbs, stops short
+    s = skeletonize(tube, elongation=4)
+    assert ndi.label(s, S26)[1] == 1
+    z, _, x = np.nonzero(s)
+    assert np.abs(z - 24).max() <= 2                  # no climb on the tall end caps
+    assert x.min() <= 13 and x.max() >= 67            # the ends reach the end of the axis
+
+
+def test_elongation_keeps_stacked_vessels_apart():
+    # two tall tubes along z separated by a 1-voxel gap
+    tubes = _tall_tube(11.5, shape=(50, 20, 80)) | _tall_tube(37.5, shape=(50, 20, 80))
+    assert ndi.label(tubes, S26)[1] == 2
+    s = skeletonize(tubes, elongation=4)
+    assert ndi.label(s, S26)[1] == 2
+
+
+def test_elongation_one_is_the_default_and_2d_ignores_it():
+    tube = _tall_tube(24)
+    assert np.array_equal(skeletonize(tube, elongation=1.0), skeletonize(tube))
+    plane = tube[24]
+    assert np.array_equal(skeletonize(plane, elongation=4), skeletonize(plane))
+    with pytest.raises(ValueError):
+        skeletonize(tube, elongation=0.5)
