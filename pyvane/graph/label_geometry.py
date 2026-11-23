@@ -94,6 +94,51 @@ def label_elongation(bin_img: np.ndarray, edt_xy: np.ndarray, points: np.ndarray
     return float(np.median(ratios))
 
 
+def label_elongation_no_skeleton(bin_img: np.ndarray, edt_xy: np.ndarray | None = None,
+                                 min_half_width: float = 2.5) -> float:
+    """Elongation of the label along z, measured without a skeleton.
+
+    Uses the runs of foreground along z (one run per vessel crossed by a column) whose center
+    is on a vessel axis: an in-plane ridge of ``edt_xy`` (a value at least as large as its 8
+    in-plane neighbours). The elongation is the median, over these runs, of the half-height
+    (half the run length) divided by the in-plane half-width (``edt_xy`` at the run center
+    minus half a voxel). Steep vessels give runs much taller than their width; the median
+    keeps their weight small in labels where most vessels run in-plane.
+
+    About 1 for round cross-sections, 4-5 for confocal labels and 2.5-3.5 for 10x widefield
+    labels. Use it for ``thinning.skeletonize(elongation=...)``.
+
+    Args:
+        bin_img: 3D binary image (z, y, x).
+        edt_xy: ``inplane_edt(bin_img)`` (computed if not given).
+        min_half_width: Runs thinner than this (voxels) are not used: they are label
+            fragments or the edges of vessels.
+
+    Returns:
+        The elongation; 1 if no run qualifies.
+    """
+    bin_img = np.asarray(bin_img, bool)
+    if edt_xy is None:
+        edt_xy = inplane_edt(bin_img)
+    edt_xy = np.minimum(edt_xy, np.float32(MAX_RADIUS))
+    # runs along z, column by column: (y, x, first z, one past the last z)
+    columns_last = np.moveaxis(bin_img, 0, -1).astype(np.int8)
+    steps = np.diff(np.pad(columns_last, ((0, 0), (0, 0), (1, 1))), axis=-1)
+    y, x, z_first = np.nonzero(steps == 1)
+    _, _, z_end = np.nonzero(steps == -1)
+    z_center = (z_first + z_end - 1) // 2
+    center_width = edt_xy[z_center, y, x]
+    on_ridge = ndi.maximum_filter(edt_xy, size=(1, 3, 3))[z_center, y, x] <= center_width
+    half_width = center_width - 0.5
+    # runs cut by the first or last slice have an unknown height
+    inside = (z_first > 0) & (z_end < bin_img.shape[0])
+    keep = on_ridge & inside & (half_width >= min_half_width)
+    if not keep.any():
+        return 1.0
+    half_height = (z_end - z_first) / 2
+    return float(np.median(half_height[keep] / half_width[keep]))
+
+
 def paths_close(path_a: np.ndarray, path_b: np.ndarray, edt_xy: np.ndarray,
                 elongation: float, width: float = 1.0) -> bool:
     """Whether two paths stay within ``width`` local label widths of each other.
